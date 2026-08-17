@@ -80,7 +80,9 @@ interface InferenceEngine {
     }
 
     companion object {
-        const val DEFAULT_PREDICT_LENGTH = 1024
+        // Kept short on purpose: long replies from small phone-class models tend to ramble into
+        // fabricated detail the longer they run.
+        const val DEFAULT_PREDICT_LENGTH = 350
     }
 }
 

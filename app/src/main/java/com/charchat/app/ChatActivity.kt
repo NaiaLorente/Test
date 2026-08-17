@@ -57,6 +57,7 @@ class ChatActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContentView(R.layout.activity_chat)
+        findViewById<View>(R.id.main).applySystemBarInsetsAsPadding()
 
         val characterId = intent.getStringExtra(EXTRA_CHARACTER_ID)
         if (characterId == null) {

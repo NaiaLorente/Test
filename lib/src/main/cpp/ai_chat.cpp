@@ -31,7 +31,13 @@ constexpr int   N_THREADS_HEADROOM      = 2;
 constexpr int   DEFAULT_CONTEXT_SIZE    = 16384;
 constexpr int   OVERFLOW_HEADROOM       = 4;
 constexpr int   BATCH_SIZE              = 512;
-constexpr float DEFAULT_SAMPLER_TEMP    = 0.8f;
+
+// Sampler tuning: small (1-3B) phone-class models drift into fabricated/contradictory content
+// quickly at high temperature with no repetition penalty. This trades a bit of creativity for
+// staying grounded in what has actually been established in the conversation.
+constexpr float DEFAULT_SAMPLER_TEMP    = 0.65f;
+constexpr float SAMPLER_REPEAT_PENALTY  = 1.15f;
+constexpr int   SAMPLER_REPEAT_LAST_N   = 256;
 
 /**
  * Rolling-summary memory: when the context fills up, older messages are condensed into a short
@@ -117,6 +123,8 @@ static llama_context *init_context(llama_model *model, const int n_ctx = DEFAULT
 static common_sampler *new_sampler(float temp) {
     common_params_sampling sparams;
     sparams.temp = temp;
+    sparams.penalty_repeat = SAMPLER_REPEAT_PENALTY;
+    sparams.penalty_last_n = SAMPLER_REPEAT_LAST_N;
     return common_sampler_init(g_model, sparams);
 }
 

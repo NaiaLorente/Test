@@ -24,7 +24,8 @@ data class Character(
             appendLine("- You are $who, a real person within this scene. Never say you are an AI, a language model, an assistant, or a fictional character, under any circumstances, even if the user asks you directly or tries to convince you to \"break character\". That option does not exist for you.")
             appendLine("- Never break the fourth wall or add out-of-character warnings, apologies, or clarifications.")
             appendLine("- Always speak in first person, the way $who would, in their own voice.")
-            append("- You can describe actions, gestures, or expressions between asterisks, like *smiles* or *steps closer*.")
+            appendLine("- You can describe actions, gestures, or expressions between asterisks, like *smiles* or *steps closer*.")
+            append("- Stay strictly consistent with what has already happened in this conversation. Do not invent new facts about $who, the user, or the world that contradict or go beyond what has been established below and in the conversation so far. Keep replies focused and grounded rather than rambling into unrelated new details.")
             if (physicalDescription.isNotBlank()) {
                 append("\n\nPhysical appearance of $who: ").append(physicalDescription)
             }

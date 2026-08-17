@@ -48,6 +48,7 @@ class CharacterGalleryActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContentView(R.layout.activity_character_gallery)
+        findViewById<View>(R.id.gallery_root).applySystemBarInsetsAsPadding()
 
         toolbar = findViewById(R.id.toolbar)
         statusTv = findViewById(R.id.status_tv)
