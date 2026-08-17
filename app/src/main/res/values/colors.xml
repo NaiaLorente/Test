@@ -1,14 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="background">#14121A</color>
-    <color name="surface">#1F1B27</color>
-    <color name="surface_variant">#2B2534</color>
-    <color name="on_background">#F3EEFA</color>
-    <color name="on_surface_variant">#B4ABC4</color>
-    <color name="primary">#B48CFF</color>
+    <color name="background">#120F1C</color>
+    <color name="surface">#1D1830</color>
+    <color name="surface_variant">#2A2242</color>
+    <color name="on_background">#F5F0FF</color>
+    <color name="on_surface_variant">#BBAED8</color>
+
+    <color name="primary">#B383FF</color>
     <color name="on_primary">#1A1023</color>
-    <color name="user_bubble">#7C5CFF</color>
-    <color name="assistant_bubble">#2B2534</color>
+    <color name="accent">#FF6FA5</color>
+    <color name="gradient_start">#9C6BFF</color>
+    <color name="gradient_end">#FF6FA5</color>
+
+    <color name="user_bubble">#8A5CFF</color>
+    <color name="assistant_bubble">#241D3C</color>
+
+    <color name="card_overlay">#CC0F0A1C</color>
+
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
 </resources>

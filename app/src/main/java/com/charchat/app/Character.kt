@@ -1,8 +1,10 @@
 package com.charchat.app
 
 import org.json.JSONObject
+import java.util.UUID
 
 data class Character(
+    val id: String = UUID.randomUUID().toString(),
     val name: String = "",
     val avatarPath: String? = null,
     val physicalDescription: String = "",
@@ -40,6 +42,7 @@ data class Character(
     }
 
     fun toJson(): JSONObject = JSONObject().apply {
+        put("id", id)
         put("name", name)
         put("avatarPath", avatarPath ?: JSONObject.NULL)
         put("physicalDescription", physicalDescription)
@@ -51,6 +54,7 @@ data class Character(
 
     companion object {
         fun fromJson(json: JSONObject): Character = Character(
+            id = json.optString("id", "").takeIf { it.isNotBlank() } ?: UUID.randomUUID().toString(),
             name = json.optString("name", ""),
             avatarPath = json.optString("avatarPath", "").takeIf { it.isNotBlank() },
             physicalDescription = json.optString("physicalDescription", ""),

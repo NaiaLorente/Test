@@ -101,6 +101,9 @@ internal class InferenceEngineImpl private constructor(
     private external fun seedAssistantMessageNative(message: String): Int
 
     @FastNative
+    private external fun seedUserMessageNative(message: String): Int
+
+    @FastNative
     private external fun processUserPrompt(userPrompt: String, predictLength: Int): Int
 
     @FastNative
@@ -231,6 +234,29 @@ internal class InferenceEngineImpl private constructor(
                 }
             }
             Log.i(TAG, "Assistant message seeded!")
+            Unit
+        }
+
+    /**
+     * Injects a canned user turn into context/history, used to replay a persisted conversation.
+     */
+    override suspend fun seedUserMessage(message: String) =
+        withContext(llamaDispatcher) {
+            require(message.isNotBlank()) { "Cannot seed an empty user message!" }
+            check(_state.value is InferenceEngine.State.ModelReady) {
+                "Cannot seed user message in ${_state.value.javaClass.simpleName}!"
+            }
+
+            Log.i(TAG, "Seeding user message...")
+            seedUserMessageNative(message).let { result ->
+                if (result != 0) {
+                    RuntimeException("Failed to seed user message: $result").also {
+                        _state.value = InferenceEngine.State.Error(it)
+                        throw it
+                    }
+                }
+            }
+            Log.i(TAG, "User message seeded!")
             Unit
         }
 

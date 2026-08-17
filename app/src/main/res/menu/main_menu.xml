@@ -6,4 +6,9 @@
         android:title="Edit character"
         android:enabled="false"
         app:showAsAction="never" />
+    <item
+        android:id="@+id/action_clear_conversation"
+        android:title="Clear conversation"
+        android:enabled="false"
+        app:showAsAction="never" />
 </menu>

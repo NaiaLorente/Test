@@ -33,6 +33,12 @@ interface InferenceEngine {
     suspend fun seedAssistantMessage(message: String)
 
     /**
+     * Injects a canned user message into the model's context/history without generating a reply,
+     * used to replay a persisted conversation after the app restarts.
+     */
+    suspend fun seedUserMessage(message: String)
+
+    /**
      * Sends a user prompt to the loaded model and returns a Flow of generated tokens.
      */
     fun sendUserPrompt(message: String, predictLength: Int = DEFAULT_PREDICT_LENGTH): Flow<String>

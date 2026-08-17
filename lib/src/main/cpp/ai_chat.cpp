@@ -623,34 +623,24 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_processUserPrompt(
 }
 
 /**
- * Injects a canned assistant turn (e.g. the character's opening greeting) directly into the
- * KV-cache and chat history, without generating it. This gives the model a concrete in-character
- * example to imitate from turn one, instead of relying on the system prompt alone.
+ * Injects a canned turn (user or assistant) directly into the KV-cache and chat history, without
+ * generating it. Used both for the character's opening greeting and for replaying a persisted
+ * conversation after the app restarts, so the model's actual memory is rebuilt, not just the UI.
  */
-extern "C"
-JNIEXPORT jint JNICALL
-Java_com_arm_aichat_internal_InferenceEngineImpl_seedAssistantMessageNative(
-        JNIEnv *env,
-        jobject /*unused*/,
-        jstring jtext
-) {
+static int seed_message(const std::string &role, const std::string &text) {
     reset_short_term_states();
 
-    const auto *const text = env->GetStringUTFChars(jtext, nullptr);
-    LOGd("%s: Seeding assistant message: \n%s", __func__, text);
-    std::string formatted_text(text);
-    env->ReleaseStringUTFChars(jtext, text);
-
+    std::string formatted_text = text;
     const bool has_chat_template = common_chat_templates_was_explicit(g_chat_templates.get());
     if (has_chat_template) {
-        formatted_text = chat_add_and_format(ROLE_ASSISTANT, formatted_text);
+        formatted_text = chat_add_and_format(role, text);
     }
 
     const auto tokens = common_tokenize(g_context, formatted_text, has_chat_template, has_chat_template);
 
     const int max_batch_size = DEFAULT_CONTEXT_SIZE - OVERFLOW_HEADROOM;
     if ((int) tokens.size() > max_batch_size) {
-        LOGe("%s: Assistant seed message too long for context! %d tokens, max: %d",
+        LOGe("%s: Seed message too long for context! %d tokens, max: %d",
              __func__, (int) tokens.size(), max_batch_size);
         return 1;
     }
@@ -663,6 +653,34 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_seedAssistantMessageNative(
     current_position += (int) tokens.size();
     mark_message_end(current_position);
     return 0;
+}
+
+extern "C"
+JNIEXPORT jint JNICALL
+Java_com_arm_aichat_internal_InferenceEngineImpl_seedAssistantMessageNative(
+        JNIEnv *env,
+        jobject /*unused*/,
+        jstring jtext
+) {
+    const auto *const text = env->GetStringUTFChars(jtext, nullptr);
+    LOGd("%s: Seeding assistant message: \n%s", __func__, text);
+    const std::string content(text);
+    env->ReleaseStringUTFChars(jtext, text);
+    return seed_message(ROLE_ASSISTANT, content);
+}
+
+extern "C"
+JNIEXPORT jint JNICALL
+Java_com_arm_aichat_internal_InferenceEngineImpl_seedUserMessageNative(
+        JNIEnv *env,
+        jobject /*unused*/,
+        jstring jtext
+) {
+    const auto *const text = env->GetStringUTFChars(jtext, nullptr);
+    LOGd("%s: Seeding user message: \n%s", __func__, text);
+    const std::string content(text);
+    env->ReleaseStringUTFChars(jtext, text);
+    return seed_message(ROLE_USER, content);
 }
 
 static bool is_valid_utf8(const char *string) {

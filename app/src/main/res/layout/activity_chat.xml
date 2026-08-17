@@ -12,16 +12,48 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:orientation="vertical"
-        tools:context=".MainActivity">
+        tools:context=".ChatActivity">
 
         <com.google.android.material.appbar.MaterialToolbar
             android:id="@+id/toolbar"
             android:layout_width="match_parent"
             android:layout_height="?attr/actionBarSize"
-            app:title="CharChat"
-            app:titleTextColor="@color/on_background"
-            app:navigationIconTint="@color/on_background"
+            app:navigationIcon="@drawable/ic_back_24"
+            app:navigationIconTint="@color/white"
             app:menu="@menu/main_menu" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="14dp"
+            android:background="@drawable/gradient_header">
+
+            <com.google.android.material.imageview.ShapeableImageView
+                android:id="@+id/header_avatar"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:background="#33FFFFFF"
+                android:padding="8dp"
+                android:scaleType="centerCrop"
+                android:src="@drawable/ic_character_placeholder"
+                app:shapeAppearanceOverlay="@style/CircleImage" />
+
+            <TextView
+                android:id="@+id/header_name"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:textColor="@color/white"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:ellipsize="end"
+                style="@style/TextAppearance.Material3.TitleMedium" />
+
+        </LinearLayout>
 
         <TextView
             android:id="@+id/status_tv"
@@ -31,7 +63,7 @@
             android:paddingVertical="8dp"
             android:textColor="@color/on_surface_variant"
             style="@style/TextAppearance.MaterialComponents.Caption"
-            android:text="Choose a .gguf model to get started." />
+            android:text="Loading conversation..." />
 
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/messages"
@@ -51,24 +83,14 @@
             android:orientation="horizontal"
             android:gravity="center_vertical"
             android:background="@color/surface"
-            android:paddingStart="8dp"
-            android:paddingEnd="4dp"
+            android:paddingHorizontal="8dp"
             android:paddingVertical="8dp">
-
-            <ImageButton
-                android:id="@+id/bench_button"
-                android:enabled="false"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
-                android:background="@android:color/transparent"
-                android:contentDescription="Benchmark"
-                android:src="@drawable/ic_bolt_24" />
 
             <com.google.android.material.textfield.TextInputLayout
                 android:layout_width="0dp"
                 android:layout_weight="1"
                 android:layout_height="wrap_content"
-                android:layout_marginHorizontal="4dp"
+                android:layout_marginEnd="8dp"
                 app:boxBackgroundMode="outline"
                 app:boxCornerRadiusTopStart="24dp"
                 app:boxCornerRadiusTopEnd="24dp"
@@ -86,18 +108,18 @@
                     android:maxLines="4"
                     android:textColor="@color/on_background"
                     android:textColorHint="@color/on_surface_variant"
-                    android:hint="Choose a .gguf model first" />
+                    android:hint="Loading..." />
 
             </com.google.android.material.textfield.TextInputLayout>
 
             <com.google.android.material.floatingactionbutton.FloatingActionButton
                 android:id="@+id/fab"
-                android:enabled="true"
+                android:enabled="false"
                 style="@style/Widget.Material3.FloatingActionButton.Primary"
                 app:fabSize="mini"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:src="@drawable/outline_folder_open_24" />
+                android:src="@drawable/outline_send_24" />
 
         </LinearLayout>
 

@@ -16,6 +16,7 @@ import com.google.android.material.button.MaterialButton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 
@@ -31,6 +32,7 @@ class CharacterSetupActivity : AppCompatActivity() {
     private lateinit var startButton: MaterialButton
 
     private var avatarPath: String? = null
+    private var editingId: String? = null
 
     private val pickImage = registerForActivityResult(
         ActivityResultContracts.PickVisualMedia()
@@ -50,7 +52,9 @@ class CharacterSetupActivity : AppCompatActivity() {
         greetingEt = findViewById(R.id.character_greeting)
         startButton = findViewById(R.id.start_chat_button)
 
-        CharacterStore.load(this)?.let { prefill(it) }
+        intent.getStringExtra(EXTRA_EDIT_CHARACTER_JSON)?.let { json ->
+            prefill(Character.fromJson(JSONObject(json)))
+        }
 
         avatarIv.setOnClickListener {
             pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
@@ -60,6 +64,7 @@ class CharacterSetupActivity : AppCompatActivity() {
     }
 
     private fun prefill(character: Character) {
+        editingId = character.id
         nameEt.setText(character.name)
         physicalEt.setText(character.physicalDescription)
         personalityEt.setText(character.personality)
@@ -103,7 +108,18 @@ class CharacterSetupActivity : AppCompatActivity() {
             return
         }
 
-        val character = Character(
+        val character = editingId?.let { id ->
+            Character(
+                id = id,
+                name = name,
+                avatarPath = avatarPath,
+                physicalDescription = physicalEt.text.toString().trim(),
+                personality = personalityEt.text.toString().trim(),
+                scenario = scenarioEt.text.toString().trim(),
+                userPersona = userPersonaEt.text.toString().trim(),
+                greeting = greetingEt.text.toString().trim()
+            )
+        } ?: Character(
             name = name,
             avatarPath = avatarPath,
             physicalDescription = physicalEt.text.toString().trim(),
@@ -112,7 +128,6 @@ class CharacterSetupActivity : AppCompatActivity() {
             userPersona = userPersonaEt.text.toString().trim(),
             greeting = greetingEt.text.toString().trim()
         )
-        CharacterStore.save(this, character)
 
         setResult(RESULT_OK, Intent().putExtra(EXTRA_CHARACTER_JSON, character.toJson().toString()))
         finish()
@@ -120,5 +135,6 @@ class CharacterSetupActivity : AppCompatActivity() {
 
     companion object {
         const val EXTRA_CHARACTER_JSON = "character_json"
+        const val EXTRA_EDIT_CHARACTER_JSON = "edit_character_json"
     }
 }

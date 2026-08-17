@@ -1,0 +1,271 @@
+package com.charchat.app
+
+import android.content.Intent
+import android.graphics.BitmapFactory
+import android.os.Bundle
+import android.util.Log
+import android.view.View
+import android.widget.TextView
+import android.widget.Toast
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import com.arm.aichat.AiChat
+import com.arm.aichat.InferenceEngine
+import com.google.android.material.appbar.MaterialToolbar
+import com.google.android.material.floatingactionbutton.FloatingActionButton
+import com.google.android.material.imageview.ShapeableImageView
+import com.google.android.material.textfield.TextInputEditText
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.onCompletion
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.util.UUID
+
+/**
+ * Chat screen for a single character. Loads that character's persisted conversation from disk
+ * and replays it into the model's actual context (not just the UI) so nothing is lost when the
+ * app is closed and reopened.
+ */
+class ChatActivity : AppCompatActivity() {
+
+    private lateinit var toolbar: MaterialToolbar
+    private lateinit var headerAvatar: ShapeableImageView
+    private lateinit var headerName: TextView
+    private lateinit var statusTv: TextView
+    private lateinit var messagesRv: RecyclerView
+    private lateinit var userInputEt: TextInputEditText
+    private lateinit var sendFab: FloatingActionButton
+
+    private lateinit var engine: InferenceEngine
+    private lateinit var character: Character
+    private var generationJob: Job? = null
+    private var isReady = false
+
+    private val messages = mutableListOf<Message>()
+    private val lastAssistantMsg = StringBuilder()
+    private val messageAdapter = MessageAdapter(messages)
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        setContentView(R.layout.activity_chat)
+
+        val characterId = intent.getStringExtra(EXTRA_CHARACTER_ID)
+        if (characterId == null) {
+            finish()
+            return
+        }
+
+        toolbar = findViewById(R.id.toolbar)
+        toolbar.setNavigationOnClickListener { finish() }
+        toolbar.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                R.id.action_edit_character -> {
+                    editCharacter.launch(
+                        Intent(this, CharacterSetupActivity::class.java)
+                            .putExtra(CharacterSetupActivity.EXTRA_EDIT_CHARACTER_JSON, character.toJson().toString())
+                    )
+                    true
+                }
+                R.id.action_clear_conversation -> {
+                    confirmClearConversation()
+                    true
+                }
+                else -> false
+            }
+        }
+
+        headerAvatar = findViewById(R.id.header_avatar)
+        headerName = findViewById(R.id.header_name)
+        statusTv = findViewById(R.id.status_tv)
+        messagesRv = findViewById(R.id.messages)
+        messagesRv.layoutManager = LinearLayoutManager(this).apply { stackFromEnd = true }
+        messagesRv.adapter = messageAdapter
+        userInputEt = findViewById(R.id.user_input)
+        sendFab = findViewById(R.id.fab)
+
+        sendFab.setOnClickListener { if (isReady) handleUserInput() }
+
+        val loaded = ConversationStore.loadMessages(this, characterId)
+        val loadedCharacter = ConversationStore.listCharacters(this).find { it.id == characterId }
+        if (loadedCharacter == null) {
+            finish()
+            return
+        }
+        character = loadedCharacter
+        messages.addAll(loaded)
+        messageAdapter.notifyDataSetChanged()
+        applyHeader()
+
+        lifecycleScope.launch(Dispatchers.Default) {
+            engine = AiChat.getInferenceEngine(applicationContext)
+            engine.state.first {
+                it !is InferenceEngine.State.Uninitialized && it !is InferenceEngine.State.Initializing
+            }
+            if (engine.state.value !is InferenceEngine.State.ModelReady) {
+                // Cold restore without going through the gallery first: bounce back there so the
+                // model gets loaded properly instead of assuming it already is.
+                withContext(Dispatchers.Main) {
+                    startActivity(Intent(this@ChatActivity, CharacterGalleryActivity::class.java))
+                    finish()
+                }
+                return@launch
+            }
+            replayConversation()
+        }
+    }
+
+    private fun applyHeader() {
+        headerName.text = character.name.ifBlank { "Unnamed" }
+        val bitmap = character.avatarPath?.let { path -> runCatching { BitmapFactory.decodeFile(path) }.getOrNull() }
+        if (bitmap != null) {
+            headerAvatar.setImageBitmap(bitmap)
+            headerAvatar.scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+            headerAvatar.setPadding(0, 0, 0, 0)
+            messageAdapter.characterAvatar = bitmap
+        } else {
+            headerAvatar.setImageResource(R.drawable.ic_character_placeholder)
+        }
+    }
+
+    /**
+     * Rebuilds the model's actual memory by replaying the persisted transcript, instead of just
+     * restoring the UI list. A brand-new character (no messages yet) gets its greeting seeded and
+     * saved as the first message, so from then on this is the only path that ever runs.
+     */
+    private suspend fun replayConversation() {
+        withContext(Dispatchers.Main) {
+            statusTv.visibility = View.VISIBLE
+            statusTv.text = "Loading conversation..."
+        }
+        try {
+            engine.setSystemPrompt(character.toSystemPrompt())
+
+            if (messages.isEmpty() && character.greeting.isNotBlank()) {
+                engine.seedAssistantMessage(character.greeting)
+                withContext(Dispatchers.Main) {
+                    messages.add(Message(UUID.randomUUID().toString(), character.greeting, false))
+                    messageAdapter.notifyItemInserted(messages.size - 1)
+                }
+                persist()
+            } else {
+                for (message in messages) {
+                    if (message.isUser) engine.seedUserMessage(message.content) else engine.seedAssistantMessage(message.content)
+                }
+            }
+
+            withContext(Dispatchers.Main) {
+                statusTv.visibility = View.GONE
+                isReady = true
+                userInputEt.hint = "Type a message..."
+                userInputEt.isEnabled = true
+                sendFab.isEnabled = true
+                toolbar.menu.findItem(R.id.action_edit_character)?.isEnabled = true
+                toolbar.menu.findItem(R.id.action_clear_conversation)?.isEnabled = true
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to prepare conversation", e)
+            withContext(Dispatchers.Main) {
+                statusTv.visibility = View.VISIBLE
+                statusTv.text = "Error loading the conversation."
+                Toast.makeText(this@ChatActivity, "Error loading the conversation: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun persist() {
+        ConversationStore.save(this, character, messages.toList())
+    }
+
+    private fun handleUserInput() {
+        userInputEt.text.toString().also { userMsg ->
+            if (userMsg.isEmpty()) {
+                Toast.makeText(this, "Type something first", Toast.LENGTH_SHORT).show()
+                return
+            }
+            userInputEt.text = null
+            userInputEt.isEnabled = false
+            sendFab.isEnabled = false
+
+            messages.add(Message(UUID.randomUUID().toString(), userMsg, true))
+            messageAdapter.notifyItemInserted(messages.size - 1)
+            lastAssistantMsg.clear()
+            messages.add(Message(UUID.randomUUID().toString(), lastAssistantMsg.toString(), false))
+            messageAdapter.notifyItemInserted(messages.size - 1)
+            persist()
+
+            generationJob = lifecycleScope.launch(Dispatchers.Default) {
+                engine.sendUserPrompt(userMsg)
+                    .onCompletion {
+                        persist()
+                        withContext(Dispatchers.Main) {
+                            userInputEt.isEnabled = true
+                            sendFab.isEnabled = true
+                        }
+                    }.collect { token ->
+                        withContext(Dispatchers.Main) {
+                            val messageCount = messages.size
+                            check(messageCount > 0 && !messages[messageCount - 1].isUser)
+
+                            messages.removeAt(messageCount - 1).copy(
+                                content = lastAssistantMsg.append(token).toString()
+                            ).let { messages.add(it) }
+
+                            messageAdapter.notifyItemChanged(messages.size - 1)
+                        }
+                    }
+            }
+        }
+    }
+
+    private fun confirmClearConversation() {
+        AlertDialog.Builder(this)
+            .setTitle("Clear conversation?")
+            .setMessage("This deletes the chat history with ${character.name.ifBlank { "this character" }}. The character itself is kept.")
+            .setPositiveButton("Clear") { _, _ -> clearConversation() }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun clearConversation() {
+        generationJob?.cancel()
+        messages.clear()
+        messageAdapter.notifyDataSetChanged()
+        persist()
+
+        isReady = false
+        userInputEt.isEnabled = false
+        sendFab.isEnabled = false
+        toolbar.menu.findItem(R.id.action_edit_character)?.isEnabled = false
+        toolbar.menu.findItem(R.id.action_clear_conversation)?.isEnabled = false
+
+        lifecycleScope.launch(Dispatchers.Default) { replayConversation() }
+    }
+
+    private val editCharacter = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val json = result.data?.getStringExtra(CharacterSetupActivity.EXTRA_CHARACTER_JSON) ?: return@registerForActivityResult
+        character = Character.fromJson(JSONObject(json))
+        applyHeader()
+        clearConversation()
+    }
+
+    override fun onStop() {
+        generationJob?.cancel()
+        super.onStop()
+    }
+
+    companion object {
+        private val TAG = ChatActivity::class.java.simpleName
+        const val EXTRA_CHARACTER_ID = "character_id"
+    }
+}
