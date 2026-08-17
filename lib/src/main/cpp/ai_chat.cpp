@@ -435,8 +435,13 @@ static std::string chat_add_and_format(const std::string &role, const std::strin
     common_chat_msg new_msg;
     new_msg.role = role;
     new_msg.content = content;
+    // use_jinja=true: the legacy (non-jinja) path only recognizes a small hardcoded set of known
+    // chat templates and throws ("this custom template is not supported, try using --jinja") on
+    // anything else, which aborted every single conversation on GGUF models whose baked-in chat
+    // template isn't one of those. The full jinja interpreter handles any valid template the
+    // model actually ships, which is what's needed for arbitrary user-picked GGUFs.
     auto formatted = common_chat_format_single(
-            g_chat_templates.get(), chat_msgs, new_msg, role == ROLE_USER, /* use_jinja */ false);
+            g_chat_templates.get(), chat_msgs, new_msg, role == ROLE_USER, /* use_jinja */ true);
     chat_msgs.push_back(new_msg);
     LOGi("%s: Formatted and added %s message: \n%s\n", __func__, role.c_str(), formatted.c_str());
     return formatted;
