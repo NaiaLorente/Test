@@ -5,6 +5,7 @@ import android.graphics.BitmapFactory
 import android.os.Bundle
 import android.util.Log
 import android.view.View
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
@@ -179,12 +180,32 @@ class ChatActivity : AppCompatActivity() {
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to prepare conversation", e)
+            val detail = "${e.javaClass.simpleName}: ${e.message}\n\n${e.stackTraceToString()}"
             withContext(Dispatchers.Main) {
                 statusTv.visibility = View.VISIBLE
                 statusTv.text = "Error loading the conversation."
-                Toast.makeText(this@ChatActivity, "Error loading the conversation: ${e.message}", Toast.LENGTH_LONG).show()
+                showErrorDetailsDialog(detail)
             }
         }
+    }
+
+    /**
+     * A fleeting Toast isn't enough to actually report a native/JNI error back - there's no PC or
+     * adb access to pull it from logcat otherwise. Show it as selectable text instead so it can be
+     * copied and sent along with a bug report.
+     */
+    private fun showErrorDetailsDialog(detail: String) {
+        val textView = TextView(this).apply {
+            text = detail
+            setTextIsSelectable(true)
+            setPadding(48, 32, 48, 32)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Error loading the conversation")
+            .setMessage("Long-press to select and copy the text below so it can be reported:")
+            .setView(ScrollView(this).apply { addView(textView) })
+            .setPositiveButton("OK", null)
+            .show()
     }
 
     private fun persist() {
