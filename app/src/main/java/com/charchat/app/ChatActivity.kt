@@ -149,6 +149,7 @@ class ChatActivity : AppCompatActivity() {
         }
         try {
             engine.setSystemPrompt(character.toSystemPrompt())
+            engine.setTemperature(character.creativity)
 
             if (messages.isEmpty() && character.greeting.isNotBlank()) {
                 engine.seedAssistantMessage(character.greeting)

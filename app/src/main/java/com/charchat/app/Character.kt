@@ -3,6 +3,9 @@ package com.charchat.app
 import org.json.JSONObject
 import java.util.UUID
 
+// Must land exactly on a slider step (valueFrom 0.2, stepSize 0.1 in activity_character_setup.xml)
+const val DEFAULT_CREATIVITY = 0.6f
+
 data class Character(
     val id: String = UUID.randomUUID().toString(),
     val name: String = "",
@@ -11,7 +14,8 @@ data class Character(
     val personality: String = "",
     val scenario: String = "",
     val userPersona: String = "",
-    val greeting: String = ""
+    val greeting: String = "",
+    val creativity: Float = DEFAULT_CREATIVITY
 ) {
     /**
      * Builds a system prompt that locks the model into the character, forbidding meta/AI
@@ -51,6 +55,7 @@ data class Character(
         put("scenario", scenario)
         put("userPersona", userPersona)
         put("greeting", greeting)
+        put("creativity", creativity.toDouble())
     }
 
     companion object {
@@ -62,7 +67,33 @@ data class Character(
             personality = json.optString("personality", ""),
             scenario = json.optString("scenario", ""),
             userPersona = json.optString("userPersona", ""),
-            greeting = json.optString("greeting", "")
+            greeting = json.optString("greeting", ""),
+            creativity = json.optDouble("creativity", DEFAULT_CREATIVITY.toDouble()).toFloat()
         )
     }
+}
+
+/**
+ * Maps a raw sampler temperature to a plain-language label and explanation, for a "creativity"
+ * slider non-technical users can actually understand.
+ */
+data class CreativityLevel(val label: String, val description: String)
+
+fun creativityLevelFor(value: Float): CreativityLevel = when {
+    value < 0.45f -> CreativityLevel(
+        "Focused",
+        "Sticks closely to the facts and what's already happened. Very consistent, but can feel repetitive."
+    )
+    value < 0.75f -> CreativityLevel(
+        "Balanced",
+        "Natural variety while staying grounded. Recommended for most characters."
+    )
+    value < 1.0f -> CreativityLevel(
+        "Creative",
+        "More expressive and spontaneous replies, with a higher chance of drifting from established facts."
+    )
+    else -> CreativityLevel(
+        "Wild",
+        "Highly unpredictable and imaginative, but often incoherent or contradictory."
+    )
 }

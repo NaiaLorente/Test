@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.arm.aichat.InferenceEngine
 import com.arm.aichat.UnsupportedArchitectureException
+import com.arm.aichat.isModelLoaded
 import com.arm.aichat.internal.InferenceEngineImpl.Companion.getInstance
 import dalvik.annotation.optimization.FastNative
 import kotlinx.coroutines.CancellationException
@@ -102,6 +103,9 @@ internal class InferenceEngineImpl private constructor(
 
     @FastNative
     private external fun seedUserMessageNative(message: String): Int
+
+    @FastNative
+    private external fun setSamplerTemperatureNative(temp: Float): Int
 
     @FastNative
     private external fun processUserPrompt(userPrompt: String, predictLength: Int): Int
@@ -257,6 +261,27 @@ internal class InferenceEngineImpl private constructor(
                 }
             }
             Log.i(TAG, "User message seeded!")
+            Unit
+        }
+
+    /**
+     * Adjusts the sampler's creativity (temperature) on the fly.
+     */
+    override suspend fun setTemperature(temperature: Float) =
+        withContext(llamaDispatcher) {
+            check(_state.value.isModelLoaded) {
+                "Cannot set temperature in ${_state.value.javaClass.simpleName}!"
+            }
+
+            setSamplerTemperatureNative(temperature).let { result ->
+                if (result != 0) {
+                    RuntimeException("Failed to set temperature: $result").also {
+                        _state.value = InferenceEngine.State.Error(it)
+                        throw it
+                    }
+                }
+            }
+            Log.i(TAG, "Temperature set to $temperature")
             Unit
         }
 

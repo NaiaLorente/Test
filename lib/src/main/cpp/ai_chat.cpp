@@ -35,7 +35,7 @@ constexpr int   BATCH_SIZE              = 512;
 // Sampler tuning: small (1-3B) phone-class models drift into fabricated/contradictory content
 // quickly at high temperature with no repetition penalty. This trades a bit of creativity for
 // staying grounded in what has actually been established in the conversation.
-constexpr float DEFAULT_SAMPLER_TEMP    = 0.65f;
+constexpr float DEFAULT_SAMPLER_TEMP    = 0.6f; // overridden per-character via setTemperature()
 constexpr float SAMPLER_REPEAT_PENALTY  = 1.15f;
 constexpr int   SAMPLER_REPEAT_LAST_N   = 256;
 
@@ -137,6 +137,31 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_prepare(JNIEnv * /*env*/, jobje
     g_batch = llama_batch_init(BATCH_SIZE, 0, 1);
     g_chat_templates = common_chat_templates_init(g_model, "");
     g_sampler = new_sampler(DEFAULT_SAMPLER_TEMP);
+    return 0;
+}
+
+/**
+ * Rebuilds the sampler with a new temperature (the user-facing "creativity" slider). Safe to call
+ * any time the model is loaded: it only swaps the sampling object, no KV-cache/position state.
+ */
+extern "C"
+JNIEXPORT jint JNICALL
+Java_com_arm_aichat_internal_InferenceEngineImpl_setSamplerTemperatureNative(
+        JNIEnv * /*env*/,
+        jobject /*unused*/,
+        jfloat temp
+) {
+    if (!g_model) {
+        LOGe("%s: model not loaded", __func__);
+        return 1;
+    }
+    auto *sampler = new_sampler(temp);
+    if (!sampler) {
+        LOGe("%s: failed to create sampler", __func__);
+        return 2;
+    }
+    common_sampler_free(g_sampler);
+    g_sampler = sampler;
     return 0;
 }
 

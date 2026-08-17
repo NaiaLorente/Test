@@ -39,6 +39,12 @@ interface InferenceEngine {
     suspend fun seedUserMessage(message: String)
 
     /**
+     * Adjusts the sampler's "creativity" (temperature). Safe to call any time a model is loaded;
+     * takes effect on the next generated reply.
+     */
+    suspend fun setTemperature(temperature: Float)
+
+    /**
      * Sends a user prompt to the loaded model and returns a Flow of generated tokens.
      */
     fun sendUserPrompt(message: String, predictLength: Int = DEFAULT_PREDICT_LENGTH): Flow<String>
