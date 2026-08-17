@@ -68,6 +68,15 @@ static llama_batch                        g_batch;
 static common_chat_templates_ptr          g_chat_templates;
 static common_sampler                   * g_sampler;
 
+// Some models wrap their reply in a "thinking"/reasoning section before the actual in-character
+// answer (OpenAI harmony-style <|channel|> markers, generic <think>...</think> tags, etc, per
+// whatever the model's own chat template declares) - built from a one-time probe of the template
+// in prepare(). When ready, generateNextToken() uses it to show/store only the final answer,
+// instead of the raw reasoning text leaking into the roleplay. Best-effort: stays false if the
+// probe fails, in which case generation falls back to raw passthrough exactly as before.
+static common_chat_parser_params          g_chat_parser_params;
+static bool                               g_chat_parser_ready = false;
+
 /**
  * Best-effort native crash diagnostics. On-device native crashes (SIGSEGV/SIGABRT/etc) leave no
  * Kotlin-catchable exception and no logcat access without a PC/adb, so there's otherwise no way
@@ -238,6 +247,35 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_prepare(JNIEnv * /*env*/, jobje
     g_batch = llama_batch_init(BATCH_SIZE, 0, 1);
     g_chat_templates = common_chat_templates_init(g_model, "");
     g_sampler = new_sampler(DEFAULT_SAMPLER_TEMP);
+
+    // One-time probe of the template so a reasoning-capable model's "thinking" section can be
+    // recognized and stripped later (see g_chat_parser_ready above). Deliberately isolated from
+    // the outer try/catch: a probe failure must not fail model loading, it should just leave
+    // g_chat_parser_ready false and fall back to showing raw text exactly as before.
+    try {
+        common_chat_templates_inputs probe_inputs;
+        common_chat_msg probe_msg;
+        probe_msg.role = "user";
+        probe_msg.content = "hi";
+        probe_inputs.messages = {probe_msg};
+        probe_inputs.add_generation_prompt = true;
+        probe_inputs.use_jinja = true;
+        probe_inputs.reasoning_format = COMMON_REASONING_FORMAT_AUTO;
+        probe_inputs.enable_thinking = true;
+        const auto probe_params = common_chat_templates_apply(g_chat_templates.get(), probe_inputs);
+        g_chat_parser_params = common_chat_parser_params(probe_params);
+        g_chat_parser_params.reasoning_format = COMMON_REASONING_FORMAT_AUTO;
+        g_chat_parser_params.parser.load(probe_params.parser);
+        g_chat_parser_ready = true;
+        LOGi("%s: chat parser ready, format=%s", __func__, common_chat_format_name(probe_params.format));
+    } catch (const std::exception &e) {
+        LOGw("%s: chat parser probe failed, falling back to raw passthrough: %s", __func__, e.what());
+        g_chat_parser_ready = false;
+    } catch (...) {
+        LOGw("%s: chat parser probe failed with a non-std exception, falling back to raw passthrough", __func__);
+        g_chat_parser_ready = false;
+    }
+
     return 0;
 } catch (const std::exception &e) {
     LOGe("%s: uncaught exception: %s", __func__, e.what());
@@ -623,16 +661,46 @@ static int shift_context() {
  * Completion loop's short-term states:
  * - stop generation position
  * - token chars caching
- * - current assistant message being generated
+ * - raw text generated so far this turn, and how much of its parsed "visible" content has
+ *   already been streamed out (see current_visible_content())
  */
-static llama_pos stop_generation_position;
+static llama_pos   stop_generation_position;
 static std::string cached_token_chars;
-static std::ostringstream assistant_ss;
+static std::string g_raw_generated;
+static size_t       g_emitted_visible_len;
+static bool         g_parse_failed_this_turn;
 
 static void reset_short_term_states() {
     stop_generation_position = 0;
     cached_token_chars.clear();
-    assistant_ss.str("");
+    g_raw_generated.clear();
+    g_emitted_visible_len = 0;
+    g_parse_failed_this_turn = false;
+}
+
+/**
+ * Returns just the user-facing reply generated so far this turn, with any "thinking"/reasoning
+ * section the model's chat template defines stripped out (see g_chat_parser_ready above). Falls
+ * back to the raw text unchanged if the parser isn't available, or the moment it fails once for
+ * this turn (rather than retrying and re-throwing on every remaining token), reproducing the old
+ * raw-passthrough behavior exactly.
+ */
+static std::string current_visible_content(bool is_partial) {
+    if (!g_chat_parser_ready || g_parse_failed_this_turn) {
+        return g_raw_generated;
+    }
+    try {
+        return common_chat_parse(g_raw_generated, is_partial, g_chat_parser_params).content;
+    } catch (const std::exception &e) {
+        LOGw("%s: chat parse failed, falling back to raw text for the rest of this reply: %s", __func__, e.what());
+        g_parse_failed_this_turn = true;
+        return g_raw_generated;
+    } catch (...) {
+        LOGw("%s: chat parse failed with a non-std exception, falling back to raw text for the rest of this reply",
+             __func__);
+        g_parse_failed_this_turn = true;
+        return g_raw_generated;
+    }
 }
 
 static int decode_tokens_in_batches(
@@ -943,28 +1011,35 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_generateNextToken(
     // Stop if next token is EOG
     if (llama_vocab_is_eog(llama_model_get_vocab(g_model), new_token_id)) {
         LOGd("id: %d,\tIS EOG!\nSTOP.", new_token_id);
-        chat_add_and_format(ROLE_ASSISTANT, assistant_ss.str());
+        chat_add_and_format(ROLE_ASSISTANT, current_visible_content(/* is_partial */ false));
         mark_message_end(current_position);
         return nullptr;
     }
 
-    // If not EOG, convert to text
-    auto new_token_chars = common_token_to_piece(g_context, new_token_id);
+    // If not EOG, convert to text. special=true: any reasoning/channel markers the model's format
+    // uses need to stay visible in the raw buffer so current_visible_content() can recognize and
+    // strip them - only the parsed, user-facing content actually gets streamed out below.
+    auto new_token_chars = common_token_to_piece(g_context, new_token_id, /* special */ true);
     cached_token_chars += new_token_chars;
 
-    // Create and return a valid UTF-8 Java string
-    jstring result = nullptr;
-    if (is_valid_utf8(cached_token_chars.c_str())) {
-        result = env->NewStringUTF(cached_token_chars.c_str());
-        LOGv("id: %d,\tcached: `%s`,\tnew: `%s`", new_token_id, cached_token_chars.c_str(), new_token_chars.c_str());
-
-        assistant_ss << cached_token_chars;
-        cached_token_chars.clear();
-    } else {
+    // Wait for a valid UTF-8 boundary before appending to the turn's raw buffer or parsing it.
+    if (!is_valid_utf8(cached_token_chars.c_str())) {
         LOGv("id: %d,\tappend to cache", new_token_id);
-        result = env->NewStringUTF("");
+        return env->NewStringUTF("");
     }
-    return result;
+    LOGv("id: %d,\tcached: `%s`,\tnew: `%s`", new_token_id, cached_token_chars.c_str(), new_token_chars.c_str());
+    g_raw_generated += cached_token_chars;
+    cached_token_chars.clear();
+
+    // Only emit what's newly visible since the last token (the diff), which is empty for as long
+    // as generation is still inside a reasoning section the parser recognizes.
+    const std::string visible = current_visible_content(/* is_partial */ true);
+    std::string delta;
+    if (visible.size() > g_emitted_visible_len) {
+        delta = visible.substr(g_emitted_visible_len);
+        g_emitted_visible_len = visible.size();
+    }
+    return env->NewStringUTF(delta.c_str());
 } catch (const std::exception &e) {
     LOGe("%s: uncaught exception: %s", __func__, e.what());
     g_last_error = e.what();
