@@ -494,10 +494,10 @@ static void compact_history_before_shift(const int n_discard) {
  * - take a quarter of the tokens that follow
  * - recompute the logits in batches
  */
-static void shift_context() {
+static int shift_context() {
     const int n_discard = (current_position - system_prompt_position) / 4;
     if (n_discard <= 0) {
-        return;
+        return 0;
     }
     LOGi("%s: Discarding %d tokens", __func__, n_discard);
 
@@ -509,6 +509,7 @@ static void shift_context() {
     llama_memory_seq_add(llama_get_memory(g_context), 0, system_prompt_position + n_discard, current_position, -n_discard);
     current_position -= n_discard;
     LOGi("%s: Context shifting done! Current position: %d", __func__, current_position);
+    return n_discard;
 }
 
 /**
@@ -531,7 +532,7 @@ static int decode_tokens_in_batches(
         llama_context *context,
         llama_batch &batch,
         const llama_tokens &tokens,
-        const llama_pos start_pos,
+        llama_pos start_pos,
         const bool compute_last_logit = false) {
     // Process tokens in batches using the global batch
     LOGd("%s: Decode %d tokens starting at position %d", __func__, (int) tokens.size(), start_pos);
@@ -540,10 +541,18 @@ static int decode_tokens_in_batches(
         common_batch_clear(batch);
         LOGv("%s: Preparing a batch size of %d starting at: %d", __func__, cur_batch_size, i);
 
-        // Shift context if current batch cannot fit into the context
-        if (start_pos + i + cur_batch_size >= DEFAULT_CONTEXT_SIZE - OVERFLOW_HEADROOM) {
+        // Shift context if current batch cannot fit into the context. shift_context() only ever
+        // operates on g_context/current_position, so it must never run while decoding into some
+        // other context (e.g. the isolated summary context) - and when it does run, it physically
+        // remaps the KV-cache and moves current_position backwards, so start_pos (this call's own
+        // snapshot of where to place tokens) must shift by the exact same amount, or every
+        // remaining token in this call - and every call after it - gets written to a stale, wrong
+        // position that silently drifts further from the KV-cache's real occupancy until writes
+        // land past the context bound and crash.
+        if (context == g_context &&
+            start_pos + i + cur_batch_size >= DEFAULT_CONTEXT_SIZE - OVERFLOW_HEADROOM) {
             LOGw("%s: Current batch won't fit into context! Shifting...", __func__);
-            shift_context();
+            start_pos -= shift_context();
         }
 
         // Add tokens to the batch with proper positions
