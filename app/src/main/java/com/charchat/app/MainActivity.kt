@@ -113,13 +113,13 @@ class MainActivity : AppCompatActivity() {
             ?.maxByOrNull { it.lastModified() }
 
         if (existingModel != null) {
-            statusTv.text = "Cargando ${existingModel.name}..."
+            statusTv.text = "Loading ${existingModel.name}..."
             lifecycleScope.launch(Dispatchers.IO) {
                 loadModel(existingModel.name, existingModel)
                 withContext(Dispatchers.Main) { onModelReady() }
             }
         } else {
-            statusTv.text = "Elige un modelo .gguf para empezar."
+            statusTv.text = "Choose a .gguf model to get started."
         }
     }
 
@@ -132,7 +132,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun handleSelectedModel(uri: Uri) {
         userActionFab.isEnabled = false
-        statusTv.text = "Leyendo el modelo..."
+        statusTv.text = "Reading the model..."
 
         lifecycleScope.launch(Dispatchers.IO) {
             Log.i(TAG, "Parsing GGUF metadata...")
@@ -182,7 +182,7 @@ class MainActivity : AppCompatActivity() {
         userInputEt.isEnabled = false
         userActionFab.isEnabled = false
         statusTv.visibility = View.VISIBLE
-        statusTv.text = "Metiéndose en el papel de ${newCharacter.name}..."
+        statusTv.text = "Getting into character as ${newCharacter.name}..."
 
         lifecycleScope.launch(Dispatchers.Default) {
             try {
@@ -197,7 +197,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     statusTv.visibility = View.GONE
                     isModelReady = true
-                    userInputEt.hint = "Escribe un mensaje..."
+                    userInputEt.hint = "Type a message..."
                     userInputEt.isEnabled = true
                     benchButton.isEnabled = true
                     userActionFab.setImageResource(R.drawable.outline_send_24)
@@ -208,8 +208,8 @@ class MainActivity : AppCompatActivity() {
                 Log.e(TAG, "Failed to apply character", e)
                 withContext(Dispatchers.Main) {
                     statusTv.visibility = View.VISIBLE
-                    statusTv.text = "Error al preparar el personaje."
-                    Toast.makeText(this@MainActivity, "Error al preparar el personaje: ${e.message}", Toast.LENGTH_LONG).show()
+                    statusTv.text = "Error setting up the character."
+                    Toast.makeText(this@MainActivity, "Error setting up the character: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             }
         }
@@ -220,7 +220,7 @@ class MainActivity : AppCompatActivity() {
             File(ensureModelsDirectory(), modelName).also { file ->
                 if (!file.exists()) {
                     Log.i(TAG, "Start copying file to $modelName")
-                    withContext(Dispatchers.Main) { statusTv.text = "Copiando el modelo..." }
+                    withContext(Dispatchers.Main) { statusTv.text = "Copying the model..." }
                     FileOutputStream(file).use { input.copyTo(it) }
                     Log.i(TAG, "Finished copying file to $modelName")
                 } else {
@@ -232,14 +232,14 @@ class MainActivity : AppCompatActivity() {
     private suspend fun loadModel(modelName: String, modelFile: File) =
         withContext(Dispatchers.IO) {
             Log.i(TAG, "Loading model $modelName")
-            withContext(Dispatchers.Main) { statusTv.text = "Cargando el modelo..." }
+            withContext(Dispatchers.Main) { statusTv.text = "Loading the model..." }
             engine.loadModel(modelFile.path)
         }
 
     private fun handleUserInput() {
         userInputEt.text.toString().also { userMsg ->
             if (userMsg.isEmpty()) {
-                Toast.makeText(this, "Escribe algo primero", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Type something first", Toast.LENGTH_SHORT).show()
             } else {
                 userInputEt.text = null
                 userInputEt.isEnabled = false

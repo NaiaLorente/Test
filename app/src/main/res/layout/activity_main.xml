@@ -31,7 +31,7 @@
             android:paddingVertical="8dp"
             android:textColor="@color/on_surface_variant"
             style="@style/TextAppearance.MaterialComponents.Caption"
-            android:text="Elige un modelo .gguf para empezar." />
+            android:text="Choose a .gguf model to get started." />
 
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/messages"
@@ -86,7 +86,7 @@
                     android:maxLines="4"
                     android:textColor="@color/on_background"
                     android:textColorHint="@color/on_surface_variant"
-                    android:hint="Elige primero un modelo .gguf" />
+                    android:hint="Choose a .gguf model first" />
 
             </com.google.android.material.textfield.TextInputLayout>
 

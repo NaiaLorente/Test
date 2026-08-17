@@ -3,7 +3,7 @@
     xmlns:app="http://schemas.android.com/apk/res-auto">
     <item
         android:id="@+id/action_edit_character"
-        android:title="Editar personaje"
+        android:title="Edit character"
         android:enabled="false"
         app:showAsAction="never" />
 </menu>

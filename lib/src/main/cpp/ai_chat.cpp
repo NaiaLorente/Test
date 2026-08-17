@@ -28,10 +28,20 @@ constexpr int   N_THREADS_MIN           = 2;
 constexpr int   N_THREADS_MAX           = 4;
 constexpr int   N_THREADS_HEADROOM      = 2;
 
-constexpr int   DEFAULT_CONTEXT_SIZE    = 8192;
+constexpr int   DEFAULT_CONTEXT_SIZE    = 16384;
 constexpr int   OVERFLOW_HEADROOM       = 4;
 constexpr int   BATCH_SIZE              = 512;
 constexpr float DEFAULT_SAMPLER_TEMP    = 0.8f;
+
+/**
+ * Rolling-summary memory: when the context fills up, older messages are condensed into a short
+ * summary (via a short, isolated generation) instead of being silently dropped, so identity and
+ * plot facts survive far longer than the raw context window would otherwise allow.
+ */
+constexpr int   SUMMARY_CONTEXT_SIZE       = 4096;
+constexpr int   SUMMARY_MAX_NEW_TOKENS     = 200;
+constexpr float SUMMARY_TEMP               = 0.3f;
+constexpr int   MIN_MESSAGES_TO_SUMMARIZE  = 2;
 
 static llama_model                      * g_model;
 static llama_context                    * g_context;
@@ -257,11 +267,15 @@ constexpr const char *ROLE_USER         = "user";
 constexpr const char *ROLE_ASSISTANT    = "assistant";
 
 static std::vector<common_chat_msg> chat_msgs;
+// End token position of each chat_msgs entry (same length as chat_msgs, or shorter mid-update).
+// chat_msgs[0] is always the pinned system/persona message and is never summarized or evicted.
+static std::vector<llama_pos> chat_msg_end_positions;
 static llama_pos system_prompt_position;
 static llama_pos current_position;
 
 static void reset_long_term_states(const bool clear_kv_cache = true) {
     chat_msgs.clear();
+    chat_msg_end_positions.clear();
     system_prompt_position = 0;
     current_position = 0;
 
@@ -269,21 +283,10 @@ static void reset_long_term_states(const bool clear_kv_cache = true) {
         llama_memory_clear(llama_get_memory(g_context), false);
 }
 
-/**
- * TODO-hyin: implement sliding-window version as a better alternative
- *
- * Context shifting by discarding the older half of the tokens appended after system prompt:
- * - take the [system_prompt_position] first tokens from the original prompt
- * - take half of the last (system_prompt_position - system_prompt_position) tokens
- * - recompute the logits in batches
- */
-static void shift_context() {
-    const int n_discard = (current_position - system_prompt_position) / 2;
-    LOGi("%s: Discarding %d tokens", __func__, n_discard);
-    llama_memory_seq_rm(llama_get_memory(g_context), 0, system_prompt_position, system_prompt_position + n_discard);
-    llama_memory_seq_add(llama_get_memory(g_context), 0, system_prompt_position + n_discard, current_position, -n_discard);
-    current_position -= n_discard;
-    LOGi("%s: Context shifting done! Current position: %d", __func__, current_position);
+static void mark_message_end(const llama_pos pos) {
+    if (chat_msg_end_positions.size() < chat_msgs.size()) {
+        chat_msg_end_positions.push_back(pos);
+    }
 }
 
 static std::string chat_add_and_format(const std::string &role, const std::string &content) {
@@ -295,6 +298,174 @@ static std::string chat_add_and_format(const std::string &role, const std::strin
     chat_msgs.push_back(new_msg);
     LOGi("%s: Formatted and added %s message: \n%s\n", __func__, role.c_str(), formatted.c_str());
     return formatted;
+}
+
+static int decode_tokens_in_batches(
+        llama_context *context,
+        llama_batch &batch,
+        const llama_tokens &tokens,
+        llama_pos start_pos,
+        bool compute_last_logit);
+
+/**
+ * Condenses the oldest messages about to be evicted (everything up to [cutoff], excluding the
+ * pinned system message) into a short summary via a short, isolated generation on a separate
+ * temporary context, then injects that summary as a synthetic system note at the current tail.
+ * The note itself becomes part of the "kept" window and will be folded into a future summary
+ * once it eventually ages out too, so the digest keeps compounding instead of ever fully
+ * disappearing. Fails safe: on any error this simply does nothing, leaving the plain discard
+ * that follows in shift_context() as the only effect.
+ */
+static std::string summarize_messages(const std::vector<common_chat_msg> &to_summarize) {
+    if (to_summarize.empty()) {
+        return "";
+    }
+
+    std::ostringstream transcript;
+    for (const auto &msg: to_summarize) {
+        transcript << msg.role << ": " << msg.content << "\n";
+    }
+
+    const std::string prompt =
+            "Summarize the roleplay conversation below in 2-4 short sentences. "
+            "Keep character names, relationships, and important facts or events. "
+            "Do not add any commentary, only output the summary itself.\n\n"
+            + transcript.str() + "\nSummary:";
+
+    auto *summary_context = init_context(g_model, SUMMARY_CONTEXT_SIZE);
+    if (!summary_context) {
+        LOGe("%s: failed to create a temporary context for summarization", __func__);
+        return "";
+    }
+
+    auto tokens = common_tokenize(summary_context, prompt, true, true);
+    const int max_prompt_tokens = SUMMARY_CONTEXT_SIZE - SUMMARY_MAX_NEW_TOKENS - OVERFLOW_HEADROOM;
+    if ((int) tokens.size() > max_prompt_tokens && max_prompt_tokens > 0) {
+        // Keep the most recent portion; the tail of the conversation matters most for context.
+        tokens.erase(tokens.begin(), tokens.end() - max_prompt_tokens);
+    }
+
+    llama_batch summary_batch = llama_batch_init(std::max((int) tokens.size(), SUMMARY_MAX_NEW_TOKENS) + 8, 0, 1);
+    std::string result;
+
+    if (decode_tokens_in_batches(summary_context, summary_batch, tokens, 0, true)) {
+        LOGe("%s: prompt decode failed", __func__);
+    } else {
+        common_params_sampling sparams;
+        sparams.temp = SUMMARY_TEMP;
+        auto *summary_sampler = common_sampler_init(g_model, sparams);
+
+        llama_pos pos = (llama_pos) tokens.size();
+        for (int i = 0; i < SUMMARY_MAX_NEW_TOKENS; i++) {
+            const auto new_token = common_sampler_sample(summary_sampler, summary_context, -1);
+            common_sampler_accept(summary_sampler, new_token, true);
+            if (llama_vocab_is_eog(llama_model_get_vocab(g_model), new_token)) {
+                break;
+            }
+            result += common_token_to_piece(summary_context, new_token);
+
+            common_batch_clear(summary_batch);
+            common_batch_add(summary_batch, new_token, pos, {0}, true);
+            if (llama_decode(summary_context, summary_batch) != 0) {
+                LOGe("%s: decode failed mid-generation", __func__);
+                break;
+            }
+            pos++;
+        }
+        common_sampler_free(summary_sampler);
+    }
+
+    llama_batch_free(summary_batch);
+    llama_free(summary_context);
+
+    LOGi("%s: produced summary: \n%s", __func__, result.c_str());
+    return result;
+}
+
+// Guards against re-entrant compaction: injecting the summary note below can itself land close
+// enough to the limit to trigger another shift_context() -> compact_history_before_shift() call
+// before this one has finished. If that happens, just skip the inner one and let the plain
+// discard proceed instead of cascading.
+static bool g_compacting_history = false;
+
+static void compact_history_before_shift(const int n_discard) {
+    if (g_compacting_history || chat_msgs.size() < 2) {
+        return; // nothing beyond the pinned system message yet, or already compacting
+    }
+
+    const llama_pos cutoff = system_prompt_position + n_discard;
+
+    // Start at 1: chat_msgs[0] is always the pinned system/persona message.
+    size_t evict_count = 1;
+    while (evict_count < chat_msg_end_positions.size() && chat_msg_end_positions[evict_count] <= cutoff) {
+        evict_count++;
+    }
+    if (evict_count - 1 < MIN_MESSAGES_TO_SUMMARIZE) {
+        return;
+    }
+
+    g_compacting_history = true;
+
+    const std::vector<common_chat_msg> to_summarize(chat_msgs.begin() + 1, chat_msgs.begin() + (long) evict_count);
+    const std::string summary = summarize_messages(to_summarize);
+    if (summary.empty()) {
+        g_compacting_history = false;
+        return;
+    }
+
+    const std::string note = "[Recap of earlier events, for reference: " + summary + "]";
+    const bool has_chat_template = common_chat_templates_was_explicit(g_chat_templates.get());
+    std::string formatted = note;
+    if (has_chat_template) {
+        formatted = chat_add_and_format(ROLE_SYSTEM, note);
+    }
+    const auto tokens = common_tokenize(g_context, formatted, has_chat_template, has_chat_template);
+
+    // Uses its own batch (not the shared g_batch), since this can run while g_batch is already
+    // mid-use by the decode_tokens_in_batches() call that triggered this shift in the first place.
+    llama_batch note_batch = llama_batch_init(std::max((int) tokens.size(), 1), 0, 1);
+    const int decode_failed = decode_tokens_in_batches(g_context, note_batch, tokens, current_position, false);
+    llama_batch_free(note_batch);
+
+    g_compacting_history = false;
+
+    if (decode_failed) {
+        LOGe("%s: failed to inject summary note", __func__);
+        return;
+    }
+
+    current_position += (int) tokens.size();
+    mark_message_end(current_position);
+
+    // Collapse the summarized messages out of the logical history so future rounds don't
+    // re-summarize content that's already gone from the KV-cache.
+    chat_msgs.erase(chat_msgs.begin() + 1, chat_msgs.begin() + (long) evict_count);
+    chat_msg_end_positions.erase(chat_msg_end_positions.begin() + 1, chat_msg_end_positions.begin() + (long) evict_count);
+
+    LOGi("%s: compacted %d old messages into a summary", __func__, (int) evict_count - 1);
+}
+
+/**
+ * Context shifting by discarding the oldest quarter of the tokens appended after the system
+ * prompt, after first folding them into a rolling summary (see compact_history_before_shift)
+ * so the eviction loses as little as possible:
+ * - take the [system_prompt_position] first tokens from the original prompt
+ * - take a quarter of the tokens that follow
+ * - recompute the logits in batches
+ */
+static void shift_context() {
+    const int n_discard = (current_position - system_prompt_position) / 4;
+    if (n_discard <= 0) {
+        return;
+    }
+    LOGi("%s: Discarding %d tokens", __func__, n_discard);
+
+    compact_history_before_shift(n_discard);
+
+    llama_memory_seq_rm(llama_get_memory(g_context), 0, system_prompt_position, system_prompt_position + n_discard);
+    llama_memory_seq_add(llama_get_memory(g_context), 0, system_prompt_position + n_discard, current_position, -n_discard);
+    current_position -= n_discard;
+    LOGi("%s: Context shifting done! Current position: %d", __func__, current_position);
 }
 
 /**
@@ -396,6 +567,7 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_processSystemPrompt(
 
     // Update position
     system_prompt_position = current_position = (int) system_tokens.size();
+    mark_message_end(current_position);
     return 0;
 }
 
@@ -445,6 +617,7 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_processUserPrompt(
 
     // Update position
     current_position += user_prompt_size;
+    mark_message_end(current_position);
     stop_generation_position = current_position + user_prompt_size + n_predict;
     return 0;
 }
@@ -488,6 +661,7 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_seedAssistantMessageNative(
     }
 
     current_position += (int) tokens.size();
+    mark_message_end(current_position);
     return 0;
 }
 
@@ -562,6 +736,7 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_generateNextToken(
     if (llama_vocab_is_eog(llama_model_get_vocab(g_model), new_token_id)) {
         LOGd("id: %d,\tIS EOG!\nSTOP.", new_token_id);
         chat_add_and_format(ROLE_ASSISTANT, assistant_ss.str());
+        mark_message_end(current_position);
         return nullptr;
     }
 

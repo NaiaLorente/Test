@@ -90,7 +90,7 @@ class CharacterSetupActivity : AppCompatActivity() {
                 }
             } else {
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(this@CharacterSetupActivity, "No se pudo cargar la imagen", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@CharacterSetupActivity, "Couldn't load the image", Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -99,7 +99,7 @@ class CharacterSetupActivity : AppCompatActivity() {
     private fun submit() {
         val name = nameEt.text.toString().trim()
         if (name.isEmpty()) {
-            Toast.makeText(this, "Ponle un nombre al personaje", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Give your character a name", Toast.LENGTH_SHORT).show()
             return
         }
 
