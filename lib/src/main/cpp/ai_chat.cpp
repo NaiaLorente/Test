@@ -81,6 +81,10 @@ static common_sampler                   * g_sampler;
 static char g_crash_log_path[512] = {0};
 static const char *volatile g_last_operation = "startup";
 
+// Message of the last caught C++ exception, surfaced to Kotlin via getLastErrorNative() so an
+// error result can be reported with its real cause instead of just a bare numeric code.
+static std::string g_last_error;
+
 static void write_proc_file_matching(FILE *out, const char *proc_path, const char *prefix, int max_lines) {
     FILE *in = fopen(proc_path, "r");
     if (!in) { return; }
@@ -154,6 +158,12 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_init(
 }
 
 extern "C"
+JNIEXPORT jstring JNICALL
+Java_com_arm_aichat_internal_InferenceEngineImpl_getLastErrorNative(JNIEnv *env, jobject /*unused*/) {
+    return env->NewStringUTF(g_last_error.c_str());
+}
+
+extern "C"
 JNIEXPORT jint JNICALL
 Java_com_arm_aichat_internal_InferenceEngineImpl_load(JNIEnv *env, jobject, jstring jmodel_path) try {
     g_last_operation = "load(model weights)";
@@ -171,9 +181,11 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_load(JNIEnv *env, jobject, jstr
     return 0;
 } catch (const std::exception &e) {
     LOGe("%s: uncaught exception: %s", __func__, e.what());
+    g_last_error = e.what();
     return 99;
 } catch (...) {
     LOGe("%s: uncaught non-std exception", __func__);
+    g_last_error = "unknown non-standard exception";
     return 98;
 }
 
@@ -229,9 +241,11 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_prepare(JNIEnv * /*env*/, jobje
     return 0;
 } catch (const std::exception &e) {
     LOGe("%s: uncaught exception: %s", __func__, e.what());
+    g_last_error = e.what();
     return 99;
 } catch (...) {
     LOGe("%s: uncaught non-std exception", __func__);
+    g_last_error = "unknown non-standard exception";
     return 98;
 }
 
@@ -715,9 +729,11 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_processSystemPrompt(
     // catchable Kotlin exception and no clear signal of why - turn it into an ordinary error
     // result instead, which the Kotlin side already surfaces as a recoverable failure.
     LOGe("%s: uncaught exception: %s", __func__, e.what());
+    g_last_error = e.what();
     return 99;
 } catch (...) {
     LOGe("%s: uncaught non-std exception", __func__);
+    g_last_error = "unknown non-standard exception";
     return 98;
 }
 
@@ -773,9 +789,11 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_processUserPrompt(
     return 0;
 } catch (const std::exception &e) {
     LOGe("%s: uncaught exception: %s", __func__, e.what());
+    g_last_error = e.what();
     return 99;
 } catch (...) {
     LOGe("%s: uncaught non-std exception", __func__);
+    g_last_error = "unknown non-standard exception";
     return 98;
 }
 
@@ -813,9 +831,11 @@ static int seed_message(const std::string &role, const std::string &text) try {
     return 0;
 } catch (const std::exception &e) {
     LOGe("%s: uncaught exception: %s", __func__, e.what());
+    g_last_error = e.what();
     return 99;
 } catch (...) {
     LOGe("%s: uncaught non-std exception", __func__);
+    g_last_error = "unknown non-standard exception";
     return 98;
 }
 
@@ -942,9 +962,11 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_generateNextToken(
     return result;
 } catch (const std::exception &e) {
     LOGe("%s: uncaught exception: %s", __func__, e.what());
+    g_last_error = e.what();
     return nullptr;
 } catch (...) {
     LOGe("%s: uncaught non-std exception", __func__);
+    g_last_error = "unknown non-standard exception";
     return nullptr;
 }
 

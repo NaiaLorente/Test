@@ -86,6 +86,10 @@ internal class InferenceEngineImpl private constructor(
     @FastNative
     private external fun init(nativeLibDir: String, crashLogPath: String)
 
+    /** Message of the last C++ exception caught at a JNI boundary, if any; empty otherwise. */
+    @FastNative
+    private external fun getLastErrorNative(): String
+
     @FastNative
     private external fun load(modelPath: String): Int
 
@@ -194,6 +198,15 @@ internal class InferenceEngineImpl private constructor(
         }
 
     /**
+     * Builds an error message including the native side's last caught exception detail (if any),
+     * so a failure can be reported with its real cause instead of just an opaque numeric code.
+     */
+    private fun describeNativeError(prefix: String, result: Int): String {
+        val detail = runCatching { getLastErrorNative() }.getOrNull()?.takeIf { it.isNotBlank() }
+        return if (detail != null) "$prefix: $result ($detail)" else "$prefix: $result"
+    }
+
+    /**
      * Process the plain text system prompt. Can be called again on an already-loaded model
      * (e.g. to switch character): the native side fully resets chat history and the KV-cache
      * before applying the new prompt.
@@ -211,7 +224,7 @@ internal class InferenceEngineImpl private constructor(
             _state.value = InferenceEngine.State.ProcessingSystemPrompt
             processSystemPrompt(systemPrompt).let { result ->
                 if (result != 0) {
-                    RuntimeException("Failed to process system prompt: $result").also {
+                    RuntimeException(describeNativeError("Failed to process system prompt", result)).also {
                         _state.value = InferenceEngine.State.Error(it)
                         throw it
                     }
@@ -234,7 +247,7 @@ internal class InferenceEngineImpl private constructor(
             Log.i(TAG, "Seeding assistant message...")
             seedAssistantMessageNative(message).let { result ->
                 if (result != 0) {
-                    RuntimeException("Failed to seed assistant message: $result").also {
+                    RuntimeException(describeNativeError("Failed to seed assistant message", result)).also {
                         _state.value = InferenceEngine.State.Error(it)
                         throw it
                     }
@@ -257,7 +270,7 @@ internal class InferenceEngineImpl private constructor(
             Log.i(TAG, "Seeding user message...")
             seedUserMessageNative(message).let { result ->
                 if (result != 0) {
-                    RuntimeException("Failed to seed user message: $result").also {
+                    RuntimeException(describeNativeError("Failed to seed user message", result)).also {
                         _state.value = InferenceEngine.State.Error(it)
                         throw it
                     }
@@ -278,7 +291,7 @@ internal class InferenceEngineImpl private constructor(
 
             setSamplerTemperatureNative(temperature).let { result ->
                 if (result != 0) {
-                    RuntimeException("Failed to set temperature: $result").also {
+                    RuntimeException(describeNativeError("Failed to set temperature", result)).also {
                         _state.value = InferenceEngine.State.Error(it)
                         throw it
                     }
@@ -306,7 +319,7 @@ internal class InferenceEngineImpl private constructor(
 
             processUserPrompt(message, predictLength).let { result ->
                 if (result != 0) {
-                    Log.e(TAG, "Failed to process user prompt: $result")
+                    Log.e(TAG, describeNativeError("Failed to process user prompt", result))
                     return@flow
                 }
             }
