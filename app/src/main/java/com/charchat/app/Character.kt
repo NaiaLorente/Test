@@ -40,7 +40,14 @@ data class Character(
                 append("\n\nScene and setting you're both in right now: ").append(scenario)
             }
             if (userPersona.isNotBlank()) {
-                append("\n\nWho the user is in this scene: ").append(userPersona)
+                append("\n\nBackground on who the user is in this scene (for your own understanding only): ")
+                    .append(userPersona)
+                append(
+                    ". This is context for you, not something you've been told in-scene: do not " +
+                        "mention, restate, confirm, or ask about these details out of nowhere, and never react " +
+                        "as if you just learned them. Only bring them up once the user actually reveals that " +
+                        "part of themselves through the conversation - until then, act like you don't know it."
+                )
             }
             append("\n\nAct and respond exclusively as $who, reacting to whatever the user says within this scene.")
         }
