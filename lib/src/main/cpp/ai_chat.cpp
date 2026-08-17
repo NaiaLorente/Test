@@ -28,7 +28,7 @@ constexpr int   N_THREADS_MIN           = 2;
 constexpr int   N_THREADS_MAX           = 4;
 constexpr int   N_THREADS_HEADROOM      = 2;
 
-constexpr int   DEFAULT_CONTEXT_SIZE    = 16384;
+constexpr int   DEFAULT_CONTEXT_SIZE    = 8192;
 constexpr int   OVERFLOW_HEADROOM       = 4;
 constexpr int   BATCH_SIZE              = 512;
 
@@ -43,7 +43,15 @@ constexpr int   SAMPLER_REPEAT_LAST_N   = 256;
  * Rolling-summary memory: when the context fills up, older messages are condensed into a short
  * summary (via a short, isolated generation) instead of being silently dropped, so identity and
  * plot facts survive far longer than the raw context window would otherwise allow.
+ *
+ * Disabled for now: this allocates a second full llama_context (its own KV-cache, batch and
+ * sampler) on top of the already-live main context, which can push combined peak memory past
+ * what phones like the target device (6-8GB RAM) can sustain, causing an OOM kill during replay
+ * of long conversations. The plain token-discard eviction in shift_context() below still runs.
+ * Re-enable only after validating memory headroom on-device (e.g. with a much smaller
+ * SUMMARY_CONTEXT_SIZE, or gated behind a runtime available-RAM check).
  */
+constexpr bool  ENABLE_ROLLING_SUMMARY     = false;
 constexpr int   SUMMARY_CONTEXT_SIZE       = 4096;
 constexpr int   SUMMARY_MAX_NEW_TOKENS     = 200;
 constexpr float SUMMARY_TEMP               = 0.3f;
@@ -493,7 +501,9 @@ static void shift_context() {
     }
     LOGi("%s: Discarding %d tokens", __func__, n_discard);
 
-    compact_history_before_shift(n_discard);
+    if (ENABLE_ROLLING_SUMMARY) {
+        compact_history_before_shift(n_discard);
+    }
 
     llama_memory_seq_rm(llama_get_memory(g_context), 0, system_prompt_position, system_prompt_position + n_discard);
     llama_memory_seq_add(llama_get_memory(g_context), 0, system_prompt_position + n_discard, current_position, -n_discard);
