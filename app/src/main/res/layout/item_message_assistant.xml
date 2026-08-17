@@ -1,10 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_marginHorizontal="16dp"
-    android:layout_marginVertical="8dp"
-    android:gravity="start">
+    android:layout_marginVertical="4dp"
+    android:gravity="bottom"
+    android:orientation="horizontal">
+
+    <com.google.android.material.imageview.ShapeableImageView
+        android:id="@+id/msg_avatar"
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:layout_marginEnd="8dp"
+        android:background="@color/surface_variant"
+        android:padding="6dp"
+        android:scaleType="centerCrop"
+        android:src="@drawable/ic_character_placeholder"
+        app:shapeAppearanceOverlay="@style/CircleImage" />
 
     <TextView
         android:id="@+id/msg_content"
@@ -12,5 +25,5 @@
         android:layout_height="wrap_content"
         android:background="@drawable/bg_assistant_message"
         android:padding="12dp"
-        android:textColor="@android:color/black" />
+        android:textColor="@color/on_background" />
 </LinearLayout>

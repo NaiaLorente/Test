@@ -4,74 +4,42 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/main"
     android:layout_height="match_parent"
-    android:layout_width="match_parent">
+    android:layout_width="match_parent"
+    android:background="@color/background">
 
     <LinearLayout
         android:fitsSystemWindows="true"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:orientation="vertical"
-        android:layout_marginEnd="4dp"
         tools:context=".MainActivity">
 
-        <ScrollView
+        <com.google.android.material.appbar.MaterialToolbar
+            android:id="@+id/toolbar"
             android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
-            android:fadeScrollbars="false">
+            android:layout_height="?attr/actionBarSize"
+            app:title="CharChat"
+            app:titleTextColor="@color/on_background"
+            app:navigationIconTint="@color/on_background"
+            app:menu="@menu/main_menu" />
 
-            <TextView
-                android:id="@+id/gguf"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:padding="16dp"
-                android:text="Selected GGUF model's metadata will show here."
-                style="@style/TextAppearance.MaterialComponents.Body2" />
-
-        </ScrollView>
-
-        <com.google.android.material.divider.MaterialDivider
-            android:layout_width="match_parent"
-            android:layout_height="2dp"
-            android:layout_marginHorizontal="16dp" />
-
-        <LinearLayout
-            android:id="@+id/persona_container"
-            android:visibility="gone"
+        <TextView
+            android:id="@+id/status_tv"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="16dp">
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="¿Con quién quieres hablar? Describe al personaje (opcional)."
-                style="@style/TextAppearance.MaterialComponents.Body2" />
-
-            <EditText
-                android:id="@+id/persona_input"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:minLines="2"
-                android:gravity="top"
-                android:padding="8dp"
-                android:hint="Ej: Eres Gandalf el Gris, hablas con sabiduría y algo de humor..." />
-
-            <Button
-                android:id="@+id/persona_button"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_gravity="end"
-                android:text="Empezar chat" />
-
-        </LinearLayout>
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="8dp"
+            android:textColor="@color/on_surface_variant"
+            style="@style/TextAppearance.MaterialComponents.Caption"
+            android:text="Elige un modelo .gguf para empezar." />
 
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/messages"
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_weight="4"
+            android:layout_weight="1"
+            android:clipToPadding="false"
+            android:paddingVertical="8dp"
             android:fadeScrollbars="false"
             android:scrollbars="vertical"
             app:reverseLayout="true"
@@ -81,33 +49,54 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:paddingStart="16dp"
-            android:paddingEnd="4dp">
+            android:gravity="center_vertical"
+            android:background="@color/surface"
+            android:paddingStart="8dp"
+            android:paddingEnd="4dp"
+            android:paddingVertical="8dp">
 
-            <Button
+            <ImageButton
                 android:id="@+id/bench_button"
                 android:enabled="false"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="⚡" />
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="@android:color/transparent"
+                android:contentDescription="Benchmark"
+                android:src="@drawable/ic_bolt_24" />
 
-            <EditText
-                android:id="@+id/user_input"
-                android:enabled="false"
+            <com.google.android.material.textfield.TextInputLayout
                 android:layout_width="0dp"
                 android:layout_weight="1"
-                android:layout_height="match_parent"
-                android:padding="8dp"
-                style="@style/TextAppearance.MaterialComponents.Body2"
-                android:hint="Please first pick a GGUF model file to import." />
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="4dp"
+                app:boxBackgroundMode="outline"
+                app:boxCornerRadiusTopStart="24dp"
+                app:boxCornerRadiusTopEnd="24dp"
+                app:boxCornerRadiusBottomStart="24dp"
+                app:boxCornerRadiusBottomEnd="24dp"
+                app:boxStrokeWidth="0dp"
+                app:boxBackgroundColor="@color/surface_variant"
+                app:hintEnabled="false">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/user_input"
+                    android:enabled="false"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:maxLines="4"
+                    android:textColor="@color/on_background"
+                    android:textColorHint="@color/on_surface_variant"
+                    android:hint="Elige primero un modelo .gguf" />
+
+            </com.google.android.material.textfield.TextInputLayout>
 
             <com.google.android.material.floatingactionbutton.FloatingActionButton
                 android:id="@+id/fab"
                 android:enabled="true"
                 style="@style/Widget.Material3.FloatingActionButton.Primary"
+                app:fabSize="mini"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_margin="12dp"
                 android:src="@drawable/outline_folder_open_24" />
 
         </LinearLayout>

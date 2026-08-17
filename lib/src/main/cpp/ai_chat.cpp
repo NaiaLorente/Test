@@ -31,7 +31,7 @@ constexpr int   N_THREADS_HEADROOM      = 2;
 constexpr int   DEFAULT_CONTEXT_SIZE    = 8192;
 constexpr int   OVERFLOW_HEADROOM       = 4;
 constexpr int   BATCH_SIZE              = 512;
-constexpr float DEFAULT_SAMPLER_TEMP    = 0.3f;
+constexpr float DEFAULT_SAMPLER_TEMP    = 0.8f;
 
 static llama_model                      * g_model;
 static llama_context                    * g_context;
@@ -446,6 +446,48 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_processUserPrompt(
     // Update position
     current_position += user_prompt_size;
     stop_generation_position = current_position + user_prompt_size + n_predict;
+    return 0;
+}
+
+/**
+ * Injects a canned assistant turn (e.g. the character's opening greeting) directly into the
+ * KV-cache and chat history, without generating it. This gives the model a concrete in-character
+ * example to imitate from turn one, instead of relying on the system prompt alone.
+ */
+extern "C"
+JNIEXPORT jint JNICALL
+Java_com_arm_aichat_internal_InferenceEngineImpl_seedAssistantMessageNative(
+        JNIEnv *env,
+        jobject /*unused*/,
+        jstring jtext
+) {
+    reset_short_term_states();
+
+    const auto *const text = env->GetStringUTFChars(jtext, nullptr);
+    LOGd("%s: Seeding assistant message: \n%s", __func__, text);
+    std::string formatted_text(text);
+    env->ReleaseStringUTFChars(jtext, text);
+
+    const bool has_chat_template = common_chat_templates_was_explicit(g_chat_templates.get());
+    if (has_chat_template) {
+        formatted_text = chat_add_and_format(ROLE_ASSISTANT, formatted_text);
+    }
+
+    const auto tokens = common_tokenize(g_context, formatted_text, has_chat_template, has_chat_template);
+
+    const int max_batch_size = DEFAULT_CONTEXT_SIZE - OVERFLOW_HEADROOM;
+    if ((int) tokens.size() > max_batch_size) {
+        LOGe("%s: Assistant seed message too long for context! %d tokens, max: %d",
+             __func__, (int) tokens.size(), max_batch_size);
+        return 1;
+    }
+
+    if (decode_tokens_in_batches(g_context, g_batch, tokens, current_position)) {
+        LOGe("%s: llama_decode() failed!", __func__);
+        return 2;
+    }
+
+    current_position += (int) tokens.size();
     return 0;
 }
 

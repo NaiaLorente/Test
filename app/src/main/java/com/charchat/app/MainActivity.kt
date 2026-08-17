@@ -1,13 +1,16 @@
 package com.charchat.app
 
+import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
 import android.view.View
-import android.widget.Button
-import android.widget.EditText
+import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
+import com.google.android.material.textfield.TextInputEditText
 import androidx.activity.addCallback
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -19,12 +22,15 @@ import com.arm.aichat.AiChat
 import com.arm.aichat.InferenceEngine
 import com.arm.aichat.gguf.GgufMetadata
 import com.arm.aichat.gguf.GgufMetadataReader
+import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
@@ -33,14 +39,12 @@ import java.util.UUID
 class MainActivity : AppCompatActivity() {
 
     // Android views
-    private lateinit var ggufTv: TextView
+    private lateinit var toolbar: MaterialToolbar
+    private lateinit var statusTv: TextView
     private lateinit var messagesRv: RecyclerView
-    private lateinit var userInputEt: EditText
+    private lateinit var userInputEt: TextInputEditText
     private lateinit var userActionFab: FloatingActionButton
-    private lateinit var personaContainer: View
-    private lateinit var personaInputEt: EditText
-    private lateinit var personaButton: Button
-    private lateinit var benchButton: Button
+    private lateinit var benchButton: ImageButton
 
     // Arm AI Chat inference engine
     private lateinit var engine: InferenceEngine
@@ -56,39 +60,67 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContentView(R.layout.activity_main)
-        // View model boilerplate and state management is out of this basic sample's scope
         onBackPressedDispatcher.addCallback { Log.w(TAG, "Ignore back press for simplicity") }
 
         // Find views
-        ggufTv = findViewById(R.id.gguf)
+        toolbar = findViewById(R.id.toolbar)
+        toolbar.setOnMenuItemClickListener { item ->
+            if (item.itemId == R.id.action_edit_character) {
+                openCharacterSetup()
+                true
+            } else {
+                false
+            }
+        }
+
+        statusTv = findViewById(R.id.status_tv)
         messagesRv = findViewById(R.id.messages)
         messagesRv.layoutManager = LinearLayoutManager(this).apply { stackFromEnd = true }
         messagesRv.adapter = messageAdapter
         userInputEt = findViewById(R.id.user_input)
         userActionFab = findViewById(R.id.fab)
-        personaContainer = findViewById(R.id.persona_container)
-        personaInputEt = findViewById(R.id.persona_input)
-        personaButton = findViewById(R.id.persona_button)
         benchButton = findViewById(R.id.bench_button)
 
         // Arm AI Chat initialization
         lifecycleScope.launch(Dispatchers.Default) {
             engine = AiChat.getInferenceEngine(applicationContext)
+            // Native library loading happens asynchronously inside the engine; wait for it to
+            // settle before touching loadModel(), which requires the Initialized state.
+            engine.state.first {
+                it !is InferenceEngine.State.Uninitialized && it !is InferenceEngine.State.Initializing
+            }
+            withContext(Dispatchers.Main) { resumeOrPickModel() }
         }
 
         // Upon CTA button tapped
         userActionFab.setOnClickListener {
             if (isModelReady) {
-                // If model is ready, validate input and send to engine
                 handleUserInput()
             } else {
-                // Otherwise, prompt user to select a GGUF metadata on the device
                 getContent.launch(arrayOf("*/*"))
             }
         }
 
-        personaButton.setOnClickListener { handlePersonaSubmit() }
         benchButton.setOnClickListener { handleBenchmarkRequest() }
+    }
+
+    /**
+     * If a model was already imported on a previous run, load it straight away instead of
+     * making the user pick the file again every time they open the app.
+     */
+    private fun resumeOrPickModel() {
+        val existingModel = ensureModelsDirectory().listFiles { f -> f.extension == "gguf" }
+            ?.maxByOrNull { it.lastModified() }
+
+        if (existingModel != null) {
+            statusTv.text = "Cargando ${existingModel.name}..."
+            lifecycleScope.launch(Dispatchers.IO) {
+                loadModel(existingModel.name, existingModel)
+                withContext(Dispatchers.Main) { onModelReady() }
+            }
+        } else {
+            statusTv.text = "Elige un modelo .gguf para empezar."
+        }
     }
 
     private val getContent = registerForActivityResult(
@@ -98,56 +130,97 @@ class MainActivity : AppCompatActivity() {
         uri?.let { handleSelectedModel(it) }
     }
 
-    /**
-     * Handles the file Uri from [getContent] result
-     */
     private fun handleSelectedModel(uri: Uri) {
-        // Update UI states
         userActionFab.isEnabled = false
-        userInputEt.hint = "Parsing GGUF..."
-        ggufTv.text = "Parsing metadata from selected file \n$uri"
+        statusTv.text = "Leyendo el modelo..."
 
         lifecycleScope.launch(Dispatchers.IO) {
-            // Parse GGUF metadata
             Log.i(TAG, "Parsing GGUF metadata...")
             contentResolver.openInputStream(uri)?.use {
                 GgufMetadataReader.create().readStructuredMetadata(it)
             }?.let { metadata ->
-                // Update UI to show GGUF metadata to user
                 Log.i(TAG, "GGUF parsed: \n$metadata")
-                withContext(Dispatchers.Main) {
-                    ggufTv.text = metadata.toString()
-                }
-
-                // Ensure the model file is available
                 val modelName = metadata.filename() + FILE_EXTENSION_GGUF
                 contentResolver.openInputStream(uri)?.use { input ->
                     ensureModelFile(modelName, input)
                 }?.let { modelFile ->
                     loadModel(modelName, modelFile)
-
-                    withContext(Dispatchers.Main) {
-                        userActionFab.isEnabled = false
-                        personaContainer.visibility = View.VISIBLE
-                    }
+                    withContext(Dispatchers.Main) { onModelReady() }
                 }
             }
         }
     }
 
-    /**
-     * Prepare the model file within app's private storage
-     */
+    private suspend fun onModelReady() {
+        userActionFab.isEnabled = false
+        openCharacterSetup()
+    }
+
+    private fun openCharacterSetup() {
+        characterSetup.launch(Intent(this, CharacterSetupActivity::class.java))
+    }
+
+    private val characterSetup = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val json = result.data?.getStringExtra(CharacterSetupActivity.EXTRA_CHARACTER_JSON) ?: return@registerForActivityResult
+        applyCharacter(Character.fromJson(JSONObject(json)))
+    }
+
+    private fun applyCharacter(newCharacter: Character) {
+        generationJob?.cancel()
+        toolbar.title = newCharacter.name
+
+        val avatarBitmap: Bitmap? = newCharacter.avatarPath?.let { path ->
+            runCatching { BitmapFactory.decodeFile(path) }.getOrNull()
+        }
+        messageAdapter.characterAvatar = avatarBitmap
+
+        messages.clear()
+        messageAdapter.notifyDataSetChanged()
+
+        userInputEt.isEnabled = false
+        userActionFab.isEnabled = false
+        statusTv.visibility = View.VISIBLE
+        statusTv.text = "Metiéndose en el papel de ${newCharacter.name}..."
+
+        lifecycleScope.launch(Dispatchers.Default) {
+            try {
+                engine.setSystemPrompt(newCharacter.toSystemPrompt())
+                if (newCharacter.greeting.isNotBlank()) {
+                    engine.seedAssistantMessage(newCharacter.greeting)
+                }
+                withContext(Dispatchers.Main) {
+                    if (newCharacter.greeting.isNotBlank()) {
+                        messages.add(Message(UUID.randomUUID().toString(), newCharacter.greeting, false))
+                        messageAdapter.notifyItemInserted(messages.size - 1)
+                    }
+                    statusTv.visibility = View.GONE
+                    isModelReady = true
+                    userInputEt.hint = "Escribe un mensaje..."
+                    userInputEt.isEnabled = true
+                    benchButton.isEnabled = true
+                    userActionFab.setImageResource(R.drawable.outline_send_24)
+                    userActionFab.isEnabled = true
+                    toolbar.menu.findItem(R.id.action_edit_character)?.isEnabled = true
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to apply character", e)
+                withContext(Dispatchers.Main) {
+                    statusTv.visibility = View.VISIBLE
+                    statusTv.text = "Error al preparar el personaje."
+                    Toast.makeText(this@MainActivity, "Error al preparar el personaje: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
     private suspend fun ensureModelFile(modelName: String, input: InputStream) =
         withContext(Dispatchers.IO) {
             File(ensureModelsDirectory(), modelName).also { file ->
-                // Copy the file into local storage if not yet done
                 if (!file.exists()) {
                     Log.i(TAG, "Start copying file to $modelName")
-                    withContext(Dispatchers.Main) {
-                        userInputEt.hint = "Copying file..."
-                    }
-
+                    withContext(Dispatchers.Main) { statusTv.text = "Copiando el modelo..." }
                     FileOutputStream(file).use { input.copyTo(it) }
                     Log.i(TAG, "Finished copying file to $modelName")
                 } else {
@@ -156,77 +229,27 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-    /**
-     * Load the model file from the app private storage
-     */
     private suspend fun loadModel(modelName: String, modelFile: File) =
         withContext(Dispatchers.IO) {
             Log.i(TAG, "Loading model $modelName")
-            withContext(Dispatchers.Main) {
-                userInputEt.hint = "Loading model..."
-            }
+            withContext(Dispatchers.Main) { statusTv.text = "Cargando el modelo..." }
             engine.loadModel(modelFile.path)
         }
 
-    /**
-     * Sets the character persona as a system prompt, then unlocks the chat input.
-     */
-    private fun handlePersonaSubmit() {
-        val persona = personaInputEt.text.toString().ifBlank { DEFAULT_PERSONA }
-        personaButton.isEnabled = false
-        personaInputEt.isEnabled = false
-
-        lifecycleScope.launch(Dispatchers.Default) {
-            try {
-                engine.setSystemPrompt(persona)
-                withContext(Dispatchers.Main) {
-                    personaContainer.visibility = View.GONE
-                    isModelReady = true
-                    userInputEt.hint = "Type and send a message!"
-                    userInputEt.isEnabled = true
-                    benchButton.isEnabled = true
-                    userActionFab.setImageResource(R.drawable.outline_send_24)
-                    userActionFab.isEnabled = true
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to set persona", e)
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(this@MainActivity, "Error al fijar el personaje: ${e.message}", Toast.LENGTH_LONG).show()
-                    personaButton.isEnabled = true
-                    personaInputEt.isEnabled = true
-                }
-            }
-        }
-    }
-
-    /**
-     * Runs the built-in llama.cpp benchmark and shows prompt-processing / token-generation
-     * speed (tokens/sec) as a chat message, so real on-device performance is visible.
-     */
-    private fun handleBenchmarkRequest() {
-        benchButton.isEnabled = false
-        lifecycleScope.launch(Dispatchers.Default) { runBenchmark() }
-            .invokeOnCompletion {
-                lifecycleScope.launch(Dispatchers.Main) { benchButton.isEnabled = true }
-            }
-    }
-
-    /**
-     * Validate and send the user message into [InferenceEngine]
-     */
     private fun handleUserInput() {
         userInputEt.text.toString().also { userMsg ->
             if (userMsg.isEmpty()) {
-                Toast.makeText(this, "Input message is empty!", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Escribe algo primero", Toast.LENGTH_SHORT).show()
             } else {
                 userInputEt.text = null
                 userInputEt.isEnabled = false
                 userActionFab.isEnabled = false
 
-                // Update message states
                 messages.add(Message(UUID.randomUUID().toString(), userMsg, true))
+                messageAdapter.notifyItemInserted(messages.size - 1)
                 lastAssistantMsg.clear()
                 messages.add(Message(UUID.randomUUID().toString(), lastAssistantMsg.toString(), false))
+                messageAdapter.notifyItemInserted(messages.size - 1)
 
                 generationJob = lifecycleScope.launch(Dispatchers.Default) {
                     engine.sendUserPrompt(userMsg)
@@ -252,28 +275,29 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * Run a benchmark with the currently loaded model
-     */
+    private fun handleBenchmarkRequest() {
+        benchButton.isEnabled = false
+        lifecycleScope.launch(Dispatchers.Default) { runBenchmark() }
+            .invokeOnCompletion {
+                lifecycleScope.launch(Dispatchers.Main) { benchButton.isEnabled = true }
+            }
+    }
+
     private suspend fun runBenchmark() =
         withContext(Dispatchers.Default) {
             Log.i(TAG, "Starts benchmarking")
-            engine.bench(
-                pp=BENCH_PROMPT_PROCESSING_TOKENS,
-                tg=BENCH_TOKEN_GENERATION_TOKENS,
-                pl=BENCH_SEQUENCE,
-                nr=BENCH_REPETITION
-            ).let { result ->
+            val result = engine.bench(
+                pp = BENCH_PROMPT_PROCESSING_TOKENS,
+                tg = BENCH_TOKEN_GENERATION_TOKENS,
+                pl = BENCH_SEQUENCE,
+                nr = BENCH_REPETITION
+            )
+            withContext(Dispatchers.Main) {
                 messages.add(Message(UUID.randomUUID().toString(), result, false))
-                withContext(Dispatchers.Main) {
-                    messageAdapter.notifyItemChanged(messages.size - 1)
-                }
+                messageAdapter.notifyItemInserted(messages.size - 1)
             }
         }
 
-    /**
-     * Create the `models` directory if not exist.
-     */
     private fun ensureModelsDirectory() =
         File(filesDir, DIRECTORY_MODELS).also {
             if (it.exists() && !it.isDirectory) { it.delete() }
@@ -295,8 +319,6 @@ class MainActivity : AppCompatActivity() {
 
         private const val DIRECTORY_MODELS = "models"
         private const val FILE_EXTENSION_GGUF = ".gguf"
-        private const val DEFAULT_PERSONA =
-            "Eres un asistente conversacional amigable. Responde siempre en el idioma del usuario."
 
         private const val BENCH_PROMPT_PROCESSING_TOKENS = 512
         private const val BENCH_TOKEN_GENERATION_TOKENS = 128

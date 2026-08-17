@@ -26,6 +26,13 @@ interface InferenceEngine {
     suspend fun setSystemPrompt(systemPrompt: String)
 
     /**
+     * Injects a canned assistant message (e.g. a character's opening greeting) into the model's
+     * context/history without generating it, so the model has a concrete in-character example to
+     * imitate from the very first turn.
+     */
+    suspend fun seedAssistantMessage(message: String)
+
+    /**
      * Sends a user prompt to the loaded model and returns a Flow of generated tokens.
      */
     fun sendUserPrompt(message: String, predictLength: Int = DEFAULT_PREDICT_LENGTH): Flow<String>

@@ -3,7 +3,7 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_marginHorizontal="16dp"
-    android:layout_marginVertical="8dp"
+    android:layout_marginVertical="4dp"
     android:gravity="end">
 
     <TextView
@@ -12,5 +12,5 @@
         android:layout_height="wrap_content"
         android:background="@drawable/bg_user_message"
         android:padding="12dp"
-        android:textColor="@android:color/white" />
+        android:textColor="@color/on_primary" />
 </LinearLayout>

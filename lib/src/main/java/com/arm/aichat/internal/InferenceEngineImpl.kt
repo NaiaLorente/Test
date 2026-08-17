@@ -98,6 +98,9 @@ internal class InferenceEngineImpl private constructor(
     private external fun processSystemPrompt(systemPrompt: String): Int
 
     @FastNative
+    private external fun seedAssistantMessageNative(message: String): Int
+
+    @FastNative
     private external fun processUserPrompt(userPrompt: String, predictLength: Int): Int
 
     @FastNative
@@ -113,7 +116,6 @@ internal class InferenceEngineImpl private constructor(
         MutableStateFlow<InferenceEngine.State>(InferenceEngine.State.Uninitialized)
     override val state: StateFlow<InferenceEngine.State> = _state.asStateFlow()
 
-    private var _readyForSystemPrompt = false
     @Volatile
     private var _cancelGeneration = false
 
@@ -162,7 +164,6 @@ internal class InferenceEngineImpl private constructor(
                 }
 
                 Log.i(TAG, "Loading model... \n$pathToModel")
-                _readyForSystemPrompt = false
                 _state.value = InferenceEngine.State.LoadingModel
                 load(pathToModel).let {
                     // TODO-han.yin: find a better way to pass other error codes
@@ -172,7 +173,6 @@ internal class InferenceEngineImpl private constructor(
                     if (it != 0) throw IOException("Failed to prepare resources")
                 }
                 Log.i(TAG, "Model loaded!")
-                _readyForSystemPrompt = true
 
                 _cancelGeneration = false
                 _state.value = InferenceEngine.State.ModelReady
@@ -184,20 +184,20 @@ internal class InferenceEngineImpl private constructor(
         }
 
     /**
-     * Process the plain text system prompt
+     * Process the plain text system prompt. Can be called again on an already-loaded model
+     * (e.g. to switch character): the native side fully resets chat history and the KV-cache
+     * before applying the new prompt.
      *
      * TODO-han.yin: return error code if system prompt not correct processed?
      */
     override suspend fun setSystemPrompt(prompt: String) =
         withContext(llamaDispatcher) {
             require(prompt.isNotBlank()) { "Cannot process empty system prompt!" }
-            check(_readyForSystemPrompt) { "System prompt must be set ** RIGHT AFTER ** model loaded!" }
             check(_state.value is InferenceEngine.State.ModelReady) {
                 "Cannot process system prompt in ${_state.value.javaClass.simpleName}!"
             }
 
             Log.i(TAG, "Sending system prompt...")
-            _readyForSystemPrompt = false
             _state.value = InferenceEngine.State.ProcessingSystemPrompt
             processSystemPrompt(prompt).let { result ->
                 if (result != 0) {
@@ -209,6 +209,28 @@ internal class InferenceEngineImpl private constructor(
             }
             Log.i(TAG, "System prompt processed! Awaiting user prompt...")
             _state.value = InferenceEngine.State.ModelReady
+        }
+
+    /**
+     * Injects a canned assistant turn (e.g. a character's greeting) into context/history
+     */
+    override suspend fun seedAssistantMessage(message: String) =
+        withContext(llamaDispatcher) {
+            require(message.isNotBlank()) { "Cannot seed an empty assistant message!" }
+            check(_state.value is InferenceEngine.State.ModelReady) {
+                "Cannot seed assistant message in ${_state.value.javaClass.simpleName}!"
+            }
+
+            Log.i(TAG, "Seeding assistant message...")
+            seedAssistantMessageNative(message).let { result ->
+                if (result != 0) {
+                    RuntimeException("Failed to seed assistant message: $result").also {
+                        _state.value = InferenceEngine.State.Error(it)
+                        throw it
+                    }
+                }
+            }
+            Log.i(TAG, "Assistant message seeded!")
         }
 
     /**
@@ -225,7 +247,6 @@ internal class InferenceEngineImpl private constructor(
 
         try {
             Log.i(TAG, "Sending user prompt...")
-            _readyForSystemPrompt = false
             _state.value = InferenceEngine.State.ProcessingUserPrompt
 
             processUserPrompt(message, predictLength).let { result ->
@@ -268,7 +289,6 @@ internal class InferenceEngineImpl private constructor(
                 "Benchmark request discarded due to: $state"
             }
             Log.i(TAG, "Start benchmark (pp: $pp, tg: $tg, pl: $pl, nr: $nr)")
-            _readyForSystemPrompt = false   // Just to be safe
             _state.value = InferenceEngine.State.Benchmarking
             benchModel(pp, tg, pl, nr).also {
                 _state.value = InferenceEngine.State.ModelReady
@@ -284,7 +304,6 @@ internal class InferenceEngineImpl private constructor(
             when (val state = _state.value) {
                 is InferenceEngine.State.ModelReady -> {
                     Log.i(TAG, "Unloading model and free resources...")
-                    _readyForSystemPrompt = false
                     _state.value = InferenceEngine.State.UnloadingModel
 
                     unload()
@@ -312,7 +331,6 @@ internal class InferenceEngineImpl private constructor(
     override fun destroy() {
         _cancelGeneration = true
         runBlocking(llamaDispatcher) {
-            _readyForSystemPrompt = false
             when(_state.value) {
                 is InferenceEngine.State.Uninitialized -> {}
                 is InferenceEngine.State.Initialized -> shutdown()

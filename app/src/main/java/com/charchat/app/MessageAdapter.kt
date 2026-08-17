@@ -1,8 +1,10 @@
 package com.charchat.app
 
+import android.graphics.Bitmap
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ImageView
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 
@@ -15,6 +17,12 @@ data class Message(
 class MessageAdapter(
     private val messages: List<Message>
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
+
+    var characterAvatar: Bitmap? = null
+        set(value) {
+            field = value
+            notifyDataSetChanged()
+        }
 
     companion object {
         private const val VIEW_TYPE_USER = 1
@@ -38,9 +46,18 @@ class MessageAdapter(
 
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
         val message = messages[position]
-        if (holder is UserMessageViewHolder || holder is AssistantMessageViewHolder) {
-            val textView = holder.itemView.findViewById<TextView>(R.id.msg_content)
-            textView.text = message.content
+        holder.itemView.findViewById<TextView>(R.id.msg_content).text = message.content
+
+        if (holder is AssistantMessageViewHolder) {
+            val avatarView = holder.itemView.findViewById<ImageView>(R.id.msg_avatar)
+            val avatar = characterAvatar
+            if (avatar != null) {
+                avatarView.setImageBitmap(avatar)
+                avatarView.scaleType = ImageView.ScaleType.CENTER_CROP
+                avatarView.setPadding(0, 0, 0, 0)
+            } else {
+                avatarView.setImageResource(R.drawable.ic_character_placeholder)
+            }
         }
     }
 
