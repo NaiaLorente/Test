@@ -231,6 +231,7 @@ internal class InferenceEngineImpl private constructor(
                 }
             }
             Log.i(TAG, "Assistant message seeded!")
+            Unit
         }
 
     /**
