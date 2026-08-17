@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.util.Log
 import android.view.View
+import android.widget.ScrollView
 import android.widget.TextView
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -15,6 +16,7 @@ import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.arm.aichat.AiChat
 import com.arm.aichat.InferenceEngine
+import com.arm.aichat.NATIVE_CRASH_LOG_FILE_NAME
 import com.arm.aichat.gguf.GgufMetadata
 import com.arm.aichat.gguf.GgufMetadataReader
 import com.google.android.material.appbar.MaterialToolbar
@@ -57,6 +59,8 @@ class CharacterGalleryActivity : AppCompatActivity() {
         charactersRv.layoutManager = GridLayoutManager(this, 2)
         mainFab = findViewById(R.id.main_fab)
 
+        showPreviousCrashIfAny()
+
         lifecycleScope.launch(Dispatchers.Default) {
             engine = AiChat.getInferenceEngine(applicationContext)
             // Native library loading happens asynchronously inside the engine; wait for it to
@@ -88,6 +92,32 @@ class CharacterGalleryActivity : AppCompatActivity() {
         if (isModelReady) {
             refreshCharacterList()
         }
+    }
+
+    /**
+     * A native crash (e.g. the app closing while "Loading conversation..." was showing) leaves no
+     * catchable exception and can't be inspected via logcat without a PC. If the previous run left
+     * a crash log behind, show it so the user can copy its contents and report back what actually
+     * happened, instead of the crash being a silent dead end.
+     */
+    private fun showPreviousCrashIfAny() {
+        val crashLog = File(filesDir, NATIVE_CRASH_LOG_FILE_NAME)
+        if (!crashLog.exists() || crashLog.length() == 0L) {
+            return
+        }
+        val content = runCatching { crashLog.readText() }.getOrDefault("(failed to read crash log)")
+        val textView = TextView(this).apply {
+            text = content
+            setTextIsSelectable(true)
+            setPadding(48, 32, 48, 32)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("The app closed unexpectedly last time")
+            .setMessage("Details below - long-press to select and copy the text so it can be reported:")
+            .setView(ScrollView(this).apply { addView(textView) })
+            .setPositiveButton("Dismiss") { _, _ -> crashLog.delete() }
+            .setCancelable(false)
+            .show()
     }
 
     private fun resumeOrPickModel() {

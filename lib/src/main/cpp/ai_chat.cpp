@@ -2,6 +2,11 @@
 #include <jni.h>
 #include <iomanip>
 #include <cmath>
+#include <cstdio>
+#include <cstring>
+#include <csignal>
+#include <signal.h>
+#include <ctime>
 #include <string>
 #include <unistd.h>
 #include <sampling.h>
@@ -63,9 +68,77 @@ static llama_batch                        g_batch;
 static common_chat_templates_ptr          g_chat_templates;
 static common_sampler                   * g_sampler;
 
+/**
+ * Best-effort native crash diagnostics. On-device native crashes (SIGSEGV/SIGABRT/etc) leave no
+ * Kotlin-catchable exception and no logcat access without a PC/adb, so there's otherwise no way
+ * for a non-technical user to report what actually happened. This installs a signal handler that
+ * appends the signal, the last high-level operation in progress, and memory stats to a plain text
+ * file under the app's own storage, then lets the crash proceed normally. Note this cannot catch
+ * SIGKILL: if the OS OOM-killer terminates the process under memory pressure, no signal is
+ * delivered at all and no log entry is written - a crash that reproduces but never leaves a log
+ * entry is itself evidence pointing at an OOM kill rather than a native bug.
+ */
+static char g_crash_log_path[512] = {0};
+static const char *volatile g_last_operation = "startup";
+
+static void write_proc_file_matching(FILE *out, const char *proc_path, const char *prefix, int max_lines) {
+    FILE *in = fopen(proc_path, "r");
+    if (!in) { return; }
+    char line[256];
+    int lines = 0;
+    while (fgets(line, sizeof(line), in) && lines < max_lines) {
+        if (!prefix || strncmp(line, prefix, strlen(prefix)) == 0) {
+            fputs(line, out);
+            lines++;
+        }
+    }
+    fclose(in);
+}
+
+static void crash_signal_handler(int sig, siginfo_t *info, void * /*ucontext*/) {
+    FILE *f = fopen(g_crash_log_path, "a");
+    if (f) {
+        const time_t now = time(nullptr);
+        fprintf(f, "=== CharChat native crash ===\n");
+        fprintf(f, "time: %ld\n", (long) now);
+        fprintf(f, "signal: %d (%s)\n", sig, strsignal(sig));
+        fprintf(f, "fault addr: %p\n", info ? info->si_addr : nullptr);
+        fprintf(f, "last operation: %s\n", g_last_operation);
+        write_proc_file_matching(f, "/proc/self/status", "Vm", 10);
+        write_proc_file_matching(f, "/proc/meminfo", nullptr, 3);
+        fprintf(f, "==============================\n\n");
+        fclose(f);
+    }
+    // Restore the default handler and re-raise so the process still terminates normally.
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+
+static void install_crash_handler(const char *path) {
+    strncpy(g_crash_log_path, path, sizeof(g_crash_log_path) - 1);
+    struct sigaction sa{};
+    sa.sa_sigaction = crash_signal_handler;
+    sa.sa_flags = SA_SIGINFO;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGSEGV, &sa, nullptr);
+    sigaction(SIGABRT, &sa, nullptr);
+    sigaction(SIGBUS, &sa, nullptr);
+    sigaction(SIGILL, &sa, nullptr);
+    sigaction(SIGFPE, &sa, nullptr);
+}
+
 extern "C"
 JNIEXPORT void JNICALL
-Java_com_arm_aichat_internal_InferenceEngineImpl_init(JNIEnv *env, jobject /*unused*/, jstring nativeLibDir) {
+Java_com_arm_aichat_internal_InferenceEngineImpl_init(
+        JNIEnv *env,
+        jobject /*unused*/,
+        jstring nativeLibDir,
+        jstring crashLogPath
+) {
+    const auto *crash_log_path = env->GetStringUTFChars(crashLogPath, 0);
+    install_crash_handler(crash_log_path);
+    env->ReleaseStringUTFChars(crashLogPath, crash_log_path);
+
     // Set llama log handler to Android
     llama_log_set(aichat_android_log_callback, nullptr);
 
@@ -82,7 +155,8 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_init(JNIEnv *env, jobject /*unu
 
 extern "C"
 JNIEXPORT jint JNICALL
-Java_com_arm_aichat_internal_InferenceEngineImpl_load(JNIEnv *env, jobject, jstring jmodel_path) {
+Java_com_arm_aichat_internal_InferenceEngineImpl_load(JNIEnv *env, jobject, jstring jmodel_path) try {
+    g_last_operation = "load(model weights)";
     llama_model_params model_params = llama_model_default_params();
 
     const auto *model_path = env->GetStringUTFChars(jmodel_path, 0);
@@ -95,9 +169,16 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_load(JNIEnv *env, jobject, jstr
     }
     g_model = model;
     return 0;
+} catch (const std::exception &e) {
+    LOGe("%s: uncaught exception: %s", __func__, e.what());
+    return 99;
+} catch (...) {
+    LOGe("%s: uncaught non-std exception", __func__);
+    return 98;
 }
 
 static llama_context *init_context(llama_model *model, const int n_ctx = DEFAULT_CONTEXT_SIZE) {
+    g_last_operation = "init_context";
     if (!model) {
         LOGe("%s: model cannot be null", __func__);
         return nullptr;
@@ -138,7 +219,7 @@ static common_sampler *new_sampler(float temp) {
 
 extern "C"
 JNIEXPORT jint JNICALL
-Java_com_arm_aichat_internal_InferenceEngineImpl_prepare(JNIEnv * /*env*/, jobject /*unused*/) {
+Java_com_arm_aichat_internal_InferenceEngineImpl_prepare(JNIEnv * /*env*/, jobject /*unused*/) try {
     auto *context = init_context(g_model);
     if (!context) { return 1; }
     g_context = context;
@@ -146,6 +227,12 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_prepare(JNIEnv * /*env*/, jobje
     g_chat_templates = common_chat_templates_init(g_model, "");
     g_sampler = new_sampler(DEFAULT_SAMPLER_TEMP);
     return 0;
+} catch (const std::exception &e) {
+    LOGe("%s: uncaught exception: %s", __func__, e.what());
+    return 99;
+} catch (...) {
+    LOGe("%s: uncaught non-std exception", __func__);
+    return 98;
 }
 
 /**
@@ -499,6 +586,7 @@ static int shift_context() {
     if (n_discard <= 0) {
         return 0;
     }
+    g_last_operation = "shift_context";
     LOGi("%s: Discarding %d tokens", __func__, n_discard);
 
     if (ENABLE_ROLLING_SUMMARY) {
@@ -579,7 +667,8 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_processSystemPrompt(
         JNIEnv *env,
         jobject /*unused*/,
         jstring jsystem_prompt
-) {
+) try {
+    g_last_operation = "processSystemPrompt";
     // Reset long-term & short-term states
     reset_long_term_states();
     reset_short_term_states();
@@ -621,6 +710,15 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_processSystemPrompt(
     system_prompt_position = current_position = (int) system_tokens.size();
     mark_message_end(current_position);
     return 0;
+} catch (const std::exception &e) {
+    // An uncaught C++ exception crossing back into the JVM aborts the whole process with no
+    // catchable Kotlin exception and no clear signal of why - turn it into an ordinary error
+    // result instead, which the Kotlin side already surfaces as a recoverable failure.
+    LOGe("%s: uncaught exception: %s", __func__, e.what());
+    return 99;
+} catch (...) {
+    LOGe("%s: uncaught non-std exception", __func__);
+    return 98;
 }
 
 extern "C"
@@ -630,7 +728,8 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_processUserPrompt(
         jobject /*unused*/,
         jstring juser_prompt,
         jint n_predict
-) {
+) try {
+    g_last_operation = "processUserPrompt";
     // Reset short-term states
     reset_short_term_states();
 
@@ -672,6 +771,12 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_processUserPrompt(
     mark_message_end(current_position);
     stop_generation_position = current_position + user_prompt_size + n_predict;
     return 0;
+} catch (const std::exception &e) {
+    LOGe("%s: uncaught exception: %s", __func__, e.what());
+    return 99;
+} catch (...) {
+    LOGe("%s: uncaught non-std exception", __func__);
+    return 98;
 }
 
 /**
@@ -679,7 +784,8 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_processUserPrompt(
  * generating it. Used both for the character's opening greeting and for replaying a persisted
  * conversation after the app restarts, so the model's actual memory is rebuilt, not just the UI.
  */
-static int seed_message(const std::string &role, const std::string &text) {
+static int seed_message(const std::string &role, const std::string &text) try {
+    g_last_operation = (role == ROLE_USER) ? "seed_message(user)" : "seed_message(assistant)";
     reset_short_term_states();
 
     std::string formatted_text = text;
@@ -705,6 +811,12 @@ static int seed_message(const std::string &role, const std::string &text) {
     current_position += (int) tokens.size();
     mark_message_end(current_position);
     return 0;
+} catch (const std::exception &e) {
+    LOGe("%s: uncaught exception: %s", __func__, e.what());
+    return 99;
+} catch (...) {
+    LOGe("%s: uncaught non-std exception", __func__);
+    return 98;
 }
 
 extern "C"
@@ -774,7 +886,8 @@ JNIEXPORT jstring JNICALL
 Java_com_arm_aichat_internal_InferenceEngineImpl_generateNextToken(
         JNIEnv *env,
         jobject /*unused*/
-) {
+) try {
+    g_last_operation = "generateNextToken";
     // Infinite text generation via context shifting
     if (current_position >= DEFAULT_CONTEXT_SIZE - OVERFLOW_HEADROOM) {
         LOGw("%s: Context full! Shifting...", __func__);
@@ -827,6 +940,12 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_generateNextToken(
         result = env->NewStringUTF("");
     }
     return result;
+} catch (const std::exception &e) {
+    LOGe("%s: uncaught exception: %s", __func__, e.what());
+    return nullptr;
+} catch (...) {
+    LOGe("%s: uncaught non-std exception", __func__);
+    return nullptr;
 }
 
 
