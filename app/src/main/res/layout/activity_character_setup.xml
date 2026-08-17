@@ -176,9 +176,9 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="24dp"
-            app:valueFrom="0.2"
-            app:valueTo="1.2"
-            app:stepSize="0.1"
+            android:valueFrom="0.2"
+            android:valueTo="1.2"
+            android:stepSize="0.1"
             app:thumbColor="@color/primary"
             app:trackColorActive="@color/primary"
             app:trackColorInactive="@color/surface_variant" />
