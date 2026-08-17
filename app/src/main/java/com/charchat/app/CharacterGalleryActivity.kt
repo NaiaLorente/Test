@@ -64,7 +64,14 @@ class CharacterGalleryActivity : AppCompatActivity() {
             engine.state.first {
                 it !is InferenceEngine.State.Uninitialized && it !is InferenceEngine.State.Initializing
             }
-            withContext(Dispatchers.Main) { resumeOrPickModel() }
+            if (engine.state.value is InferenceEngine.State.ModelReady) {
+                // A model is already loaded in the shared singleton engine (e.g. this screen was
+                // recreated after being backgrounded, or a chat screen bounced back here) -
+                // calling loadModel() again would throw, since it requires the Initialized state.
+                withContext(Dispatchers.Main) { onModelReady() }
+            } else {
+                withContext(Dispatchers.Main) { resumeOrPickModel() }
+            }
         }
 
         mainFab.setOnClickListener {

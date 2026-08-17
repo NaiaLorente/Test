@@ -159,7 +159,11 @@ class ChatActivity : AppCompatActivity() {
                 }
                 persist()
             } else {
+                // Blank entries can't happen going forward (persist() filters them out), but
+                // skip them defensively anyway so an already-saved conversation from before that
+                // fix isn't stuck forever: seedUserMessage/seedAssistantMessage reject blank text.
                 for (message in messages) {
+                    if (message.content.isBlank()) continue
                     if (message.isUser) engine.seedUserMessage(message.content) else engine.seedAssistantMessage(message.content)
                 }
             }
@@ -184,7 +188,10 @@ class ChatActivity : AppCompatActivity() {
     }
 
     private fun persist() {
-        ConversationStore.save(this, character, messages.toList())
+        // Drop blank messages (e.g. the empty assistant placeholder added right before generation
+        // starts) so a persisted transcript is never left with an unreplayable empty entry if the
+        // app closes mid-reply.
+        ConversationStore.save(this, character, messages.filter { it.content.isNotBlank() })
     }
 
     private fun handleUserInput() {
