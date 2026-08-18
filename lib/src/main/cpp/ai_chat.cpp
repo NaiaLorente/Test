@@ -34,12 +34,13 @@ constexpr int   N_THREADS_MIN           = 2;
 constexpr int   N_THREADS_MAX           = 4;
 constexpr int   N_THREADS_HEADROOM      = 2;
 
-// Raised from 8192 now that the daily-driver models are 3-4B/7B rather than the 8B model that
-// prompted the original OOM-safety reduction - real memory headroom is much better at these
-// sizes. Combined with the rolling summary below, this is the main lever for "remembers more of
-// the conversation," since a bigger raw window means fewer, later evictions before the summary
-// mechanism ever needs to kick in.
-constexpr int   DEFAULT_CONTEXT_SIZE    = 12288;
+// Raised again (12288 -> 16384) now that the confirmed-fast daily-driver models are all in the
+// 3-4B class, which have plenty of RAM headroom to spare for a bigger KV-cache. This is the main
+// lever for "remembers more of the conversation": a bigger raw window means fewer, later
+// evictions before the rolling-summary mechanism below ever needs to kick in at all. Revisit this
+// downward again if a bigger model (7B+) becomes the daily driver, the same way it was cut for
+// the 8B Stheno experiments.
+constexpr int   DEFAULT_CONTEXT_SIZE    = 16384;
 constexpr int   OVERFLOW_HEADROOM       = 4;
 constexpr int   BATCH_SIZE              = 512;
 
@@ -66,8 +67,8 @@ constexpr int   SAMPLER_REPEAT_LAST_N   = 256;
  * second context's memory footprint small regardless.
  */
 constexpr bool  ENABLE_ROLLING_SUMMARY     = true;
-constexpr int   SUMMARY_CONTEXT_SIZE       = 1024;
-constexpr int   SUMMARY_MAX_NEW_TOKENS     = 200;
+constexpr int   SUMMARY_CONTEXT_SIZE       = 1280;
+constexpr int   SUMMARY_MAX_NEW_TOKENS     = 300;
 constexpr float SUMMARY_TEMP               = 0.3f;
 constexpr int   MIN_MESSAGES_TO_SUMMARIZE  = 2;
 
@@ -521,8 +522,10 @@ static std::string summarize_messages(const std::vector<common_chat_msg> &to_sum
     }
 
     const std::string prompt =
-            "Summarize the roleplay conversation below in 2-4 short sentences. "
-            "Keep character names, relationships, and important facts or events. "
+            "Summarize the roleplay conversation below in 4-6 short sentences. "
+            "Keep character names, relationships, locations, and important facts, decisions, or "
+            "events - be specific rather than vague, since this summary is the only memory of "
+            "this part of the conversation going forward. "
             "Do not add any commentary, only output the summary itself.\n\n"
             + transcript.str() + "\nSummary:";
 
