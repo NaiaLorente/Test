@@ -147,9 +147,19 @@ class ChatActivity : AppCompatActivity() {
      * saved as the first message, so from then on this is the only path that ever runs.
      */
     private suspend fun replayConversation() {
-        withContext(Dispatchers.Main) {
+        // A live elapsed-time readout, same reasoning as the generation ticker in
+        // handleUserInput(): setting up a fresh character (system prompt + greeting) is its own
+        // separate step that can take a while on a slow/misbehaving model, and this makes a long
+        // wait here visibly alive instead of indistinguishable from a hang, with a precise number
+        // to report back.
+        val startMs = SystemClock.elapsedRealtime()
+        val tickerJob = lifecycleScope.launch(Dispatchers.Main) {
             statusTv.visibility = View.VISIBLE
-            statusTv.text = "Loading conversation..."
+            while (isActive) {
+                val elapsedS = (SystemClock.elapsedRealtime() - startMs) / 1000
+                statusTv.text = "Loading conversation... ${elapsedS}s"
+                delay(1000)
+            }
         }
         try {
             engine.setSystemPrompt(character.toSystemPrompt())
@@ -189,6 +199,8 @@ class ChatActivity : AppCompatActivity() {
                 statusTv.text = "Error loading the conversation."
                 showErrorDetailsDialog(detail)
             }
+        } finally {
+            tickerJob.cancel()
         }
     }
 
