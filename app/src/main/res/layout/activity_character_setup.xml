@@ -43,13 +43,25 @@
             app:shapeAppearanceOverlay="@style/CircleImage" />
 
         <TextView
+            android:id="@+id/avatar_pick_label"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="center_horizontal"
             android:layout_marginTop="8dp"
-            android:layout_marginBottom="20dp"
+            android:layout_marginBottom="12dp"
             android:text="Tap to choose a photo"
             android:textColor="@color/primary"
+            style="@style/TextAppearance.CharChat.Body.LabelLarge" />
+
+        <TextView
+            android:id="@+id/avatar_adjust_crop_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginBottom="8dp"
+            android:text="Adjust crop"
+            android:textColor="@color/on_surface_variant"
+            android:visibility="gone"
             style="@style/TextAppearance.CharChat.Body.LabelLarge" />
 
         <com.google.android.material.textfield.TextInputLayout

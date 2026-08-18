@@ -2,7 +2,6 @@ package com.charchat.app
 
 import android.content.Intent
 import android.graphics.BitmapFactory
-import android.net.Uri
 import android.os.Bundle
 import android.view.View
 import android.widget.EditText
@@ -13,19 +12,15 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.lifecycle.lifecycleScope
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.slider.Slider
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
-import java.io.FileOutputStream
 
 class CharacterSetupActivity : AppCompatActivity() {
 
     private lateinit var avatarIv: ImageView
+    private lateinit var avatarAdjustCropLabel: TextView
     private lateinit var nameEt: EditText
     private lateinit var physicalEt: EditText
     private lateinit var personalityEt: EditText
@@ -42,7 +37,20 @@ class CharacterSetupActivity : AppCompatActivity() {
 
     private val pickImage = registerForActivityResult(
         ActivityResultContracts.PickVisualMedia()
-    ) { uri -> uri?.let { copyAvatar(it) } }
+    ) { uri ->
+        uri?.let {
+            avatarCrop.launch(Intent(this, AvatarCropActivity::class.java).putExtra(AvatarCropActivity.EXTRA_SOURCE_URI, it.toString()))
+        }
+    }
+
+    private val avatarCrop = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val path = result.data?.getStringExtra(AvatarCropActivity.EXTRA_RESULT_PATH) ?: return@registerForActivityResult
+        avatarPath = path
+        avatarIv.setImageBitmap(BitmapFactory.decodeFile(path))
+        updateAvatarLabels()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -51,6 +59,7 @@ class CharacterSetupActivity : AppCompatActivity() {
         findViewById<View>(R.id.setup_root).applySystemBarInsetsAsPadding()
 
         avatarIv = findViewById(R.id.avatar_image)
+        avatarAdjustCropLabel = findViewById(R.id.avatar_adjust_crop_label)
         nameEt = findViewById(R.id.character_name)
         physicalEt = findViewById(R.id.character_physical)
         personalityEt = findViewById(R.id.character_personality)
@@ -73,8 +82,18 @@ class CharacterSetupActivity : AppCompatActivity() {
         avatarIv.setOnClickListener {
             pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
         }
+        avatarAdjustCropLabel.setOnClickListener {
+            avatarPath?.let { path ->
+                avatarCrop.launch(Intent(this, AvatarCropActivity::class.java).putExtra(AvatarCropActivity.EXTRA_SOURCE_PATH, path))
+            }
+        }
+        updateAvatarLabels()
 
         startButton.setOnClickListener { submit() }
+    }
+
+    private fun updateAvatarLabels() {
+        avatarAdjustCropLabel.visibility = if (avatarPath != null) View.VISIBLE else View.GONE
     }
 
     private fun updateCreativityText(value: Float) {
@@ -97,28 +116,6 @@ class CharacterSetupActivity : AppCompatActivity() {
         avatarPath?.let { path ->
             File(path).takeIf { it.exists() }?.let {
                 avatarIv.setImageBitmap(BitmapFactory.decodeFile(it.path))
-            }
-        }
-    }
-
-    private fun copyAvatar(uri: Uri) {
-        lifecycleScope.launch(Dispatchers.IO) {
-            val file = File(filesDir, "avatar_${System.currentTimeMillis()}.jpg")
-            val copied = runCatching {
-                contentResolver.openInputStream(uri)?.use { input ->
-                    FileOutputStream(file).use { output -> input.copyTo(output) }
-                } != null
-            }.getOrDefault(false)
-
-            if (copied) {
-                avatarPath = file.path
-                withContext(Dispatchers.Main) {
-                    avatarIv.setImageBitmap(BitmapFactory.decodeFile(file.path))
-                }
-            } else {
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(this@CharacterSetupActivity, "Couldn't load the image", Toast.LENGTH_SHORT).show()
-                }
             }
         }
     }
