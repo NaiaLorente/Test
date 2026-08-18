@@ -34,7 +34,12 @@ constexpr int   N_THREADS_MIN           = 2;
 constexpr int   N_THREADS_MAX           = 4;
 constexpr int   N_THREADS_HEADROOM      = 2;
 
-constexpr int   DEFAULT_CONTEXT_SIZE    = 8192;
+// Raised from 8192 now that the daily-driver models are 3-4B/7B rather than the 8B model that
+// prompted the original OOM-safety reduction - real memory headroom is much better at these
+// sizes. Combined with the rolling summary below, this is the main lever for "remembers more of
+// the conversation," since a bigger raw window means fewer, later evictions before the summary
+// mechanism ever needs to kick in.
+constexpr int   DEFAULT_CONTEXT_SIZE    = 12288;
 constexpr int   OVERFLOW_HEADROOM       = 4;
 constexpr int   BATCH_SIZE              = 512;
 
@@ -48,17 +53,20 @@ constexpr int   SAMPLER_REPEAT_LAST_N   = 256;
 /**
  * Rolling-summary memory: when the context fills up, older messages are condensed into a short
  * summary (via a short, isolated generation) instead of being silently dropped, so identity and
- * plot facts survive far longer than the raw context window would otherwise allow.
+ * plot facts survive far longer than the raw context window would otherwise allow - this is what
+ * actually gives an unbounded "remembers the whole conversation" guarantee, since any fixed raw
+ * context eventually fills up no matter how large.
  *
- * Disabled for now: this allocates a second full llama_context (its own KV-cache, batch and
- * sampler) on top of the already-live main context, which can push combined peak memory past
- * what phones like the target device (6-8GB RAM) can sustain, causing an OOM kill during replay
- * of long conversations. The plain token-discard eviction in shift_context() below still runs.
- * Re-enable only after validating memory headroom on-device (e.g. with a much smaller
- * SUMMARY_CONTEXT_SIZE, or gated behind a runtime available-RAM check).
+ * Re-enabled: this was disabled earlier over a suspected OOM risk from the second llama_context
+ * it allocates (its own KV-cache, batch and sampler) on top of the main one. That was never
+ * actually confirmed - the real cause of the crashes chased at the time turned out to be a
+ * separate KV-cache position-tracking bug (since fixed), unrelated to summarization. Re-enabling
+ * now with SUMMARY_CONTEXT_SIZE cut way down (4096 -> 1024): summarizing a handful of evicted
+ * messages into ~200 tokens never needed anywhere near 4096 tokens of context, so this keeps the
+ * second context's memory footprint small regardless.
  */
-constexpr bool  ENABLE_ROLLING_SUMMARY     = false;
-constexpr int   SUMMARY_CONTEXT_SIZE       = 4096;
+constexpr bool  ENABLE_ROLLING_SUMMARY     = true;
+constexpr int   SUMMARY_CONTEXT_SIZE       = 1024;
 constexpr int   SUMMARY_MAX_NEW_TOKENS     = 200;
 constexpr float SUMMARY_TEMP               = 0.3f;
 constexpr int   MIN_MESSAGES_TO_SUMMARIZE  = 2;
