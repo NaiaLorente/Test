@@ -228,29 +228,31 @@ class ChatActivity : AppCompatActivity() {
             messages.add(Message(UUID.randomUUID().toString(), userMsg, true))
             messageAdapter.notifyItemInserted(messages.size - 1)
             lastAssistantMsg.clear()
-            messages.add(Message(UUID.randomUUID().toString(), lastAssistantMsg.toString(), false))
+            messages.add(Message(UUID.randomUUID().toString(), "", false, isThinking = true))
             messageAdapter.notifyItemInserted(messages.size - 1)
             persist()
 
             generationJob = lifecycleScope.launch(Dispatchers.Default) {
                 engine.sendUserPrompt(userMsg)
                     .onCompletion {
-                        persist()
-                        withContext(Dispatchers.Main) {
-                            userInputEt.isEnabled = true
-                            sendFab.isEnabled = true
-                        }
-                    }.collect { token ->
+                        // Reveal the reply only once generation is fully done, instead of as it's
+                        // being written, replacing the thinking indicator with the complete text.
                         withContext(Dispatchers.Main) {
                             val messageCount = messages.size
                             check(messageCount > 0 && !messages[messageCount - 1].isUser)
 
                             messages.removeAt(messageCount - 1).copy(
-                                content = lastAssistantMsg.append(token).toString()
+                                content = lastAssistantMsg.toString(),
+                                isThinking = false
                             ).let { messages.add(it) }
 
                             messageAdapter.notifyItemChanged(messages.size - 1)
+                            userInputEt.isEnabled = true
+                            sendFab.isEnabled = true
                         }
+                        persist()
+                    }.collect { token ->
+                        lastAssistantMsg.append(token)
                     }
             }
         }

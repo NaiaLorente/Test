@@ -26,4 +26,37 @@
         android:background="@drawable/bg_assistant_message"
         android:padding="12dp"
         android:textColor="@color/on_background" />
+
+    <LinearLayout
+        android:id="@+id/thinking_dots"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:background="@drawable/bg_assistant_message"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="14dp"
+        android:visibility="gone">
+
+        <View
+            android:id="@+id/dot_1"
+            android:layout_width="8dp"
+            android:layout_height="8dp"
+            android:background="@drawable/dot_thinking" />
+
+        <View
+            android:id="@+id/dot_2"
+            android:layout_width="8dp"
+            android:layout_height="8dp"
+            android:layout_marginStart="6dp"
+            android:background="@drawable/dot_thinking" />
+
+        <View
+            android:id="@+id/dot_3"
+            android:layout_width="8dp"
+            android:layout_height="8dp"
+            android:layout_marginStart="6dp"
+            android:background="@drawable/dot_thinking" />
+
+    </LinearLayout>
 </LinearLayout>

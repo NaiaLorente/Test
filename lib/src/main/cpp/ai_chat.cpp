@@ -2,8 +2,6 @@
 #include <jni.h>
 #include <iomanip>
 #include <cmath>
-#include <cctype>
-#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <csignal>
@@ -38,14 +36,6 @@ constexpr int   N_THREADS_HEADROOM      = 2;
 constexpr int   DEFAULT_CONTEXT_SIZE    = 8192;
 constexpr int   OVERFLOW_HEADROOM       = 4;
 constexpr int   BATCH_SIZE              = 512;
-
-// Wall-clock target for a single reply, independent of its token-length cap: a bigger/slower
-// model can take far longer to reach either EOG or the token limit than a small fast one, and
-// the user should never be left waiting far past this regardless of which model is loaded. Once
-// past this target, generation still gets a short grace window (below) to land on a complete
-// sentence instead of being cut off mid-word the instant the target is hit.
-constexpr int64_t MAX_GENERATION_TIME_US       = 60'000'000; // 1 minute
-constexpr int64_t GENERATION_GRACE_TIME_US     = 15'000'000; // +15s max, only to finish the sentence
 
 // Sampler tuning: small (1-3B) phone-class models drift into fabricated/contradictory content
 // quickly at high temperature with no repetition penalty. This trades a bit of creativity for
@@ -675,7 +665,6 @@ static int shift_context() {
  *   (see current_visible_content() and visible_content_delta())
  */
 static llama_pos   stop_generation_position;
-static int64_t     g_generation_deadline_us = INT64_MAX;
 static std::string cached_token_chars;
 static std::string g_raw_generated;
 static std::string g_emitted_visible_text;
@@ -734,28 +723,10 @@ static std::string visible_content_delta(const std::string &visible) {
 }
 
 /**
- * Whether the visible reply so far already ends on a complete sentence (after any trailing
- * whitespace or a closing *action* asterisk), used to let the time budget's grace window end
- * generation at a natural break instead of an arbitrary mid-word cut.
- */
-static bool ends_at_sentence_boundary(const std::string &text) {
-    size_t i = text.size();
-    while (i > 0 && (std::isspace((unsigned char) text[i - 1]) || text[i - 1] == '*')) {
-        i--;
-    }
-    if (i == 0) {
-        return false;
-    }
-    const char c = text[i - 1];
-    return c == '.' || c == '!' || c == '?';
-}
-
-/**
  * Finalizes the assistant's turn regardless of *why* generation stopped (natural end-of-message,
- * hitting the token-length cap, or hitting the wall-clock cap): stores the clean reply into chat
- * history and marks its end position. Without this, a reply cut short by a limit rather than a
- * natural stop would never get recorded, leaving future turns' chat-template rendering silently
- * missing this message.
+ * or hitting the token-length cap): stores the clean reply into chat history and marks its end
+ * position. Without this, a reply cut short by the length cap would never get recorded, leaving
+ * future turns' chat-template rendering silently missing this message.
  */
 static void finalize_assistant_turn(const char *reason) {
     LOGw("%s: STOP: %s", __func__, reason);
@@ -919,7 +890,6 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_processUserPrompt(
     current_position += user_prompt_size;
     mark_message_end(current_position);
     stop_generation_position = current_position + user_prompt_size + n_predict;
-    g_generation_deadline_us = ggml_time_us() + MAX_GENERATION_TIME_US;
     return 0;
 } catch (const std::exception &e) {
     LOGe("%s: uncaught exception: %s", __func__, e.what());
@@ -1051,21 +1021,6 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_generateNextToken(
     // Stop if reaching the marked position
     if (current_position >= stop_generation_position) {
         finalize_assistant_turn("hit the token-length cap");
-        return nullptr;
-    }
-
-    // Stop if this reply has been generating longer than the wall-clock budget, regardless of how
-    // many tokens it took to get there - a bigger/slower model must never leave the user waiting
-    // far past this, independent of its token-length cap. Past the target but still within the
-    // grace window, only stop once what's generated so far already ends on a complete sentence,
-    // so the reply doesn't get cut off mid-word; the grace window itself is a hard ceiling.
-    const int64_t now_us = ggml_time_us();
-    if (now_us >= g_generation_deadline_us + GENERATION_GRACE_TIME_US) {
-        finalize_assistant_turn("hit the generation time budget (grace window expired)");
-        return nullptr;
-    }
-    if (now_us >= g_generation_deadline_us && ends_at_sentence_boundary(current_visible_content(/* is_partial */ true))) {
-        finalize_assistant_turn("hit the generation time budget at a clean sentence break");
         return nullptr;
     }
 

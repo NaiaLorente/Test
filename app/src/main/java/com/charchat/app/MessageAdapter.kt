@@ -1,5 +1,8 @@
 package com.charchat.app
 
+import android.animation.AnimatorSet
+import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
 import android.graphics.Bitmap
 import android.graphics.Typeface
 import android.text.Spannable
@@ -17,7 +20,10 @@ import org.json.JSONObject
 data class Message(
     val id: String,
     val content: String,
-    val isUser: Boolean
+    val isUser: Boolean,
+    // Transient UI state only (a thinking placeholder always has blank content, which persist()
+    // already filters out) - never meaningfully round-trips through JSON, but default it safely.
+    val isThinking: Boolean = false
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
@@ -104,9 +110,20 @@ class MessageAdapter(
 
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
         val message = messages[position]
-        holder.itemView.findViewById<TextView>(R.id.msg_content).text = styleRoleplayText(message.content)
+        val contentView = holder.itemView.findViewById<TextView>(R.id.msg_content)
 
         if (holder is AssistantMessageViewHolder) {
+            if (message.isThinking) {
+                contentView.visibility = View.GONE
+                holder.thinkingDots.visibility = View.VISIBLE
+                holder.startThinkingAnimation()
+            } else {
+                holder.stopThinkingAnimation()
+                holder.thinkingDots.visibility = View.GONE
+                contentView.visibility = View.VISIBLE
+                contentView.text = styleRoleplayText(message.content)
+            }
+
             val avatarView = holder.itemView.findViewById<ImageView>(R.id.msg_avatar)
             val avatar = characterAvatar
             if (avatar != null) {
@@ -116,11 +133,50 @@ class MessageAdapter(
             } else {
                 avatarView.setImageResource(R.drawable.ic_character_placeholder)
             }
+        } else {
+            contentView.text = styleRoleplayText(message.content)
+        }
+    }
+
+    override fun onViewRecycled(holder: RecyclerView.ViewHolder) {
+        super.onViewRecycled(holder)
+        if (holder is AssistantMessageViewHolder) {
+            holder.stopThinkingAnimation()
         }
     }
 
     override fun getItemCount(): Int = messages.size
 
     class UserMessageViewHolder(view: View) : RecyclerView.ViewHolder(view)
-    class AssistantMessageViewHolder(view: View) : RecyclerView.ViewHolder(view)
+
+    class AssistantMessageViewHolder(view: View) : RecyclerView.ViewHolder(view) {
+        val thinkingDots: View = view.findViewById(R.id.thinking_dots)
+        private val dots = listOf<View>(
+            view.findViewById(R.id.dot_1),
+            view.findViewById(R.id.dot_2),
+            view.findViewById(R.id.dot_3)
+        )
+        private var animatorSet: AnimatorSet? = null
+
+        fun startThinkingAnimation() {
+            if (animatorSet?.isRunning == true) return
+            val animators = dots.mapIndexed { index, dot ->
+                ObjectAnimator.ofFloat(dot, View.ALPHA, 0.3f, 1f, 0.3f).apply {
+                    duration = 900
+                    startDelay = index * 150L
+                    repeatCount = ValueAnimator.INFINITE
+                }
+            }
+            animatorSet = AnimatorSet().apply {
+                playTogether(animators)
+                start()
+            }
+        }
+
+        fun stopThinkingAnimation() {
+            animatorSet?.cancel()
+            animatorSet = null
+            dots.forEach { it.alpha = 1f }
+        }
+    }
 }
