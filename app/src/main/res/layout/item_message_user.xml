@@ -4,6 +4,7 @@
     android:layout_height="wrap_content"
     android:layout_marginHorizontal="16dp"
     android:layout_marginVertical="4dp"
+    android:orientation="vertical"
     android:gravity="end">
 
     <TextView
@@ -13,4 +14,18 @@
         android:background="@drawable/bg_user_message"
         android:padding="12dp"
         android:textColor="@color/on_user_bubble" />
+
+    <!-- Only shown on the last message the user sent. -->
+    <ImageView
+        android:id="@+id/msg_edit"
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:layout_marginEnd="-6dp"
+        android:padding="7dp"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:src="@drawable/ic_edit_24"
+        android:tint="@color/on_surface_faint"
+        android:contentDescription="Edit message"
+        android:visibility="gone" />
+
 </LinearLayout>

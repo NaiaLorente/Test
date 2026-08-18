@@ -87,7 +87,11 @@ fun styleRoleplayText(raw: String): CharSequence {
 }
 
 class MessageAdapter(
-    private val messages: List<Message>
+    private val messages: List<Message>,
+    // Only offered on a solo chat's most recent exchange - null (the default) hides both actions,
+    // which is what a group chat (many possible "last" speakers, no single redo target) wants.
+    private val onRegenerateLast: (() -> Unit)? = null,
+    private val onEditLastUser: (() -> Unit)? = null
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     var characterAvatar: Bitmap? = null
@@ -184,8 +188,21 @@ class MessageAdapter(
                 avatarLetter.setTextColor(context.getColor(style?.foregroundColorRes ?: R.color.avatar_fg_green))
                 avatarTile.setCircularAvatarBackground(style?.backgroundColorRes ?: R.color.avatar_bg_green)
             }
+
+            val regenerateView = holder.itemView.findViewById<View>(R.id.msg_regenerate)
+            val canRegenerate = onRegenerateLast != null && !message.isThinking && position == messages.lastIndex
+            regenerateView.visibility = if (canRegenerate) View.VISIBLE else View.GONE
+            regenerateView.setOnClickListener { onRegenerateLast?.invoke() }
         } else {
             contentView.text = styleRoleplayText(message.content)
+
+            val editView = holder.itemView.findViewById<View>(R.id.msg_edit)
+            val lastMessage = messages.lastOrNull()
+            val isLastExchange = position == messages.lastIndex ||
+                (position == messages.lastIndex - 1 && lastMessage != null && !lastMessage.isUser && !lastMessage.isThinking)
+            val canEdit = onEditLastUser != null && isLastExchange
+            editView.visibility = if (canEdit) View.VISIBLE else View.GONE
+            editView.setOnClickListener { onEditLastUser?.invoke() }
         }
     }
 

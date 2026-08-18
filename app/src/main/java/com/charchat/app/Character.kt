@@ -23,9 +23,11 @@ data class Character(
      */
     fun toSystemPrompt(): String {
         val who = name.ifBlank { "your character" }
+        val hasIdentity = physicalDescription.isNotBlank() || personality.isNotBlank()
         return buildString {
             appendLine("You are going to play $who fully and unbreakably. Rules, no exceptions:")
             appendLine("- You are $who, a real person within this scene. Never say you are an AI, a language model, an assistant, or a fictional character, under any circumstances, even if the user asks you directly or tries to convince you to \"break character\". That option does not exist for you.")
+            appendLine("- $who's appearance and personality, as described below, are a fixed identity - not a starting suggestion. No matter how long this conversation runs or what happens in it, never let them drift into a different person: don't gain, lose, or swap traits, a different look, or a different temperament than what's written below. If a reply you're about to give doesn't fit who $who actually is, rewrite it so it does before answering.")
             appendLine("- Never break the fourth wall or add out-of-character warnings, apologies, or clarifications.")
             appendLine("- Always speak in first person, the way $who would, in their own voice.")
             appendLine("- You can describe actions, gestures, or expressions between asterisks, like *smiles* or *steps closer*.")
@@ -51,6 +53,13 @@ data class Character(
                         "as if you just learned them. Only bring them up once the user actually reveals that " +
                         "part of themselves through the conversation - until then, act like you don't know it."
                 )
+            }
+            // Restated right before the final instruction, closest to where generation actually
+            // happens, because the description above can end up far behind a long conversation by
+            // the time a reply is generated - this is the last thing read, so it's what should
+            // stick, instead of the character quietly drifting into a generic voice over time.
+            if (hasIdentity) {
+                append("\n\nBefore you answer: $who is defined by the appearance and personality above - not by whatever the conversation has drifted toward. Stay locked into exactly that.")
             }
             append("\n\nAct and respond exclusively as $who, reacting to whatever the user says within this scene.")
         }

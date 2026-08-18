@@ -61,7 +61,11 @@ class ChatActivity : AppCompatActivity() {
 
     private val messages = mutableListOf<Message>()
     private val lastAssistantMsg = StringBuilder()
-    private val messageAdapter = MessageAdapter(messages)
+    private val messageAdapter = MessageAdapter(
+        messages,
+        onRegenerateLast = { regenerateLastReply() },
+        onEditLastUser = { startEditingLastUserMessage() }
+    )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -176,7 +180,7 @@ class ChatActivity : AppCompatActivity() {
      * restoring the UI list. A brand-new character (no messages yet) gets its greeting seeded and
      * saved as the first message, so from then on this is the only path that ever runs.
      */
-    private suspend fun replayConversation() {
+    private suspend fun replayConversation(tickerLabel: String = "Loading conversation") {
         // A live elapsed-time readout, same reasoning as the generation ticker in
         // handleUserInput(): setting up a fresh character (system prompt + greeting) is its own
         // separate step that can take a while on a slow/misbehaving model, and this makes a long
@@ -187,7 +191,7 @@ class ChatActivity : AppCompatActivity() {
             statusTv.visibility = View.VISIBLE
             while (isActive) {
                 val elapsedS = (SystemClock.elapsedRealtime() - startMs) / 1000
-                statusTv.text = "Loading conversation... ${elapsedS}s"
+                statusTv.text = "$tickerLabel... ${elapsedS}s"
                 delay(1000)
             }
         }
@@ -261,60 +265,128 @@ class ChatActivity : AppCompatActivity() {
     }
 
     private fun handleUserInput() {
-        userInputEt.text.toString().also { userMsg ->
-            if (userMsg.isEmpty()) {
-                Toast.makeText(this, "Type something first", Toast.LENGTH_SHORT).show()
-                return
+        val userMsg = userInputEt.text.toString()
+        if (userMsg.isEmpty()) {
+            Toast.makeText(this, "Type something first", Toast.LENGTH_SHORT).show()
+            return
+        }
+        userInputEt.text = null
+        sendMessage(userMsg)
+    }
+
+    /**
+     * Adds a user message and generates the reply to it. Shared by normal sending and by
+     * [regenerateLastReply]/[startEditingLastUserMessage], which both remove the tail of the
+     * conversation, resync the model's context to match, and then call this again.
+     */
+    private fun sendMessage(userMsg: String) {
+        userInputEt.isEnabled = false
+        sendFab.isEnabled = false
+
+        messages.add(Message(UUID.randomUUID().toString(), userMsg, true))
+        messageAdapter.notifyItemInserted(messages.size - 1)
+        lastAssistantMsg.clear()
+        messages.add(Message(UUID.randomUUID().toString(), "", false, isThinking = true))
+        messageAdapter.notifyItemInserted(messages.size - 1)
+        persist()
+
+        // A live elapsed-time readout while waiting, so a long wait is visibly "still working"
+        // rather than indistinguishable silence from something actually stuck - and gives a
+        // precise number to report back instead of an estimate like "about 7 minutes".
+        val generationStartMs = SystemClock.elapsedRealtime()
+        val tickerJob = lifecycleScope.launch(Dispatchers.Main) {
+            statusTv.visibility = View.VISIBLE
+            while (isActive) {
+                val elapsedS = (SystemClock.elapsedRealtime() - generationStartMs) / 1000
+                statusTv.text = "Thinking... ${elapsedS}s"
+                delay(1000)
             }
-            userInputEt.text = null
-            userInputEt.isEnabled = false
-            sendFab.isEnabled = false
+        }
 
-            messages.add(Message(UUID.randomUUID().toString(), userMsg, true))
-            messageAdapter.notifyItemInserted(messages.size - 1)
-            lastAssistantMsg.clear()
-            messages.add(Message(UUID.randomUUID().toString(), "", false, isThinking = true))
-            messageAdapter.notifyItemInserted(messages.size - 1)
-            persist()
+        generationJob = lifecycleScope.launch(Dispatchers.Default) {
+            engine.sendUserPrompt(userMsg)
+                .onCompletion {
+                    tickerJob.cancel()
+                    // Reveal the reply only once generation is fully done, instead of as it's
+                    // being written, replacing the thinking indicator with the complete text.
+                    withContext(Dispatchers.Main) {
+                        statusTv.visibility = View.GONE
+                        val messageCount = messages.size
+                        check(messageCount > 0 && !messages[messageCount - 1].isUser)
 
-            // A live elapsed-time readout while waiting, so a long wait is visibly "still working"
-            // rather than indistinguishable silence from something actually stuck - and gives a
-            // precise number to report back instead of an estimate like "about 7 minutes".
-            val generationStartMs = SystemClock.elapsedRealtime()
-            val tickerJob = lifecycleScope.launch(Dispatchers.Main) {
-                statusTv.visibility = View.VISIBLE
-                while (isActive) {
-                    val elapsedS = (SystemClock.elapsedRealtime() - generationStartMs) / 1000
-                    statusTv.text = "Thinking... ${elapsedS}s"
-                    delay(1000)
-                }
-            }
+                        messages.removeAt(messageCount - 1).copy(
+                            content = lastAssistantMsg.toString(),
+                            isThinking = false
+                        ).let { messages.add(it) }
 
-            generationJob = lifecycleScope.launch(Dispatchers.Default) {
-                engine.sendUserPrompt(userMsg)
-                    .onCompletion {
-                        tickerJob.cancel()
-                        // Reveal the reply only once generation is fully done, instead of as it's
-                        // being written, replacing the thinking indicator with the complete text.
-                        withContext(Dispatchers.Main) {
-                            statusTv.visibility = View.GONE
-                            val messageCount = messages.size
-                            check(messageCount > 0 && !messages[messageCount - 1].isUser)
-
-                            messages.removeAt(messageCount - 1).copy(
-                                content = lastAssistantMsg.toString(),
-                                isThinking = false
-                            ).let { messages.add(it) }
-
-                            messageAdapter.notifyItemChanged(messages.size - 1)
-                            userInputEt.isEnabled = true
-                            sendFab.isEnabled = true
-                        }
-                        persist()
-                    }.collect { token ->
-                        lastAssistantMsg.append(token)
+                        messageAdapter.notifyItemChanged(messages.size - 1)
+                        userInputEt.isEnabled = true
+                        sendFab.isEnabled = true
                     }
-            }
+                    persist()
+                }.collect { token ->
+                    lastAssistantMsg.append(token)
+                }
+        }
+    }
+
+    /**
+     * Drops the last exchange and asks the model for a fresh reply to the same user message -
+     * the model's context has no "undo" of its own, so this resyncs it by replaying everything
+     * up to (but not including) that pair, then resending the same user message.
+     */
+    private fun regenerateLastReply() {
+        if (!isReady || generationJob?.isActive == true) return
+        val lastIndex = messages.lastIndex
+        if (lastIndex < 0) return
+        val lastMessage = messages[lastIndex]
+        if (lastMessage.isUser || lastMessage.isThinking) return
+        val userIndex = lastIndex - 1
+        if (userIndex < 0 || !messages[userIndex].isUser) return
+        val userText = messages[userIndex].content
+
+        messages.removeAt(lastIndex)
+        messages.removeAt(userIndex)
+        messageAdapter.notifyItemRangeRemoved(userIndex, 2)
+        persist()
+        resyncThenRun { sendMessage(userText) }
+    }
+
+    /**
+     * Removes the last user message (and the reply it got, if any) and puts its text back in the
+     * input box to edit, resyncing the model's context to match so the edited version replaces it
+     * cleanly instead of the model seeing both.
+     */
+    private fun startEditingLastUserMessage() {
+        if (!isReady || generationJob?.isActive == true) return
+        val lastIndex = messages.lastIndex
+        if (lastIndex < 0) return
+
+        val (userIndex, removeCount) = when {
+            messages[lastIndex].isUser -> lastIndex to 1
+            lastIndex - 1 >= 0 && messages[lastIndex - 1].isUser && !messages[lastIndex].isThinking -> (lastIndex - 1) to 2
+            else -> return
+        }
+        val userText = messages[userIndex].content
+
+        repeat(removeCount) { messages.removeAt(messages.lastIndex) }
+        messageAdapter.notifyItemRangeRemoved(userIndex, removeCount)
+        persist()
+        resyncThenRun {
+            userInputEt.setText(userText)
+            userInputEt.setSelection(userText.length)
+            userInputEt.requestFocus()
+        }
+    }
+
+    /** Resets and replays the (already-trimmed) [messages] list, then runs [onReady] on the main thread. */
+    private fun resyncThenRun(onReady: () -> Unit) {
+        isReady = false
+        userInputEt.isEnabled = false
+        sendFab.isEnabled = false
+        lifecycleScope.launch(Dispatchers.Default) {
+            replayConversation(tickerLabel = "Preparing")
+            withContext(Dispatchers.Main) { onReady() }
         }
     }
 

@@ -30,6 +30,7 @@ data class Group(
         appendLine("- Never break the fourth wall or add out-of-character warnings, apologies, or meta commentary.")
         appendLine("- Bracketed cues like \"[Name's turn]\" are stage directions telling you which single character to voice next - nobody actually said them in-scene. Never quote them, react to them, or mention them in a reply.")
         appendLine("- When a cue names a character, write ONLY that character's next line or action, in their own voice and first person, reacting to whatever just happened in the scene. Never write for any other character, and never write for the user. Never prefix the line with the character's name - just write their dialogue/actions directly.")
+        appendLine("- Each character's appearance and personality, listed below, is a fixed identity - not a starting suggestion. No matter how long the scene runs, never let a character drift into a different person, borrow another character's traits, or flatten into a generic voice. If a line you're about to write doesn't fit who that character actually is, rewrite it so it does before answering.")
         appendLine("- You can describe actions, gestures, or expressions between asterisks, like *smiles* or *steps closer*.")
         appendLine("- Stay strictly consistent with everything already said by the user and by every character in this scene so far - it is shared memory for the whole group, not a separate private conversation per character. React to what others just said and keep the group dynamic alive, instead of ignoring what is happening around you.")
         appendLine("- Keep replies short, like real spoken dialogue: usually 1-4 sentences, occasionally more only if the moment truly calls for it.")
@@ -46,6 +47,10 @@ data class Group(
                 append("\nPersonality and current mood: ").append(character.personality)
             }
         }
+        // Restated last, closest to where generation actually happens, because this description
+        // can end up far behind by the time a reply is generated in a long scene - this is the
+        // last thing read, so it's what should stick, instead of characters blurring together.
+        append("\n\nBefore you answer a \"[Name's turn]\" cue: re-read that character's entry above and stay locked into exactly that appearance and personality, not whatever the scene has drifted toward.")
     }
 
     fun toJson(): JSONObject = JSONObject().apply {

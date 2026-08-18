@@ -95,5 +95,18 @@
                 android:background="@drawable/dot_thinking" />
 
         </LinearLayout>
+
+        <!-- Only shown on the most recent reply. -->
+        <ImageView
+            android:id="@+id/msg_regenerate"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:layout_marginStart="-6dp"
+            android:padding="7dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_redo_24"
+            android:tint="@color/on_surface_faint"
+            android:contentDescription="Regenerate reply"
+            android:visibility="gone" />
     </LinearLayout>
 </LinearLayout>
