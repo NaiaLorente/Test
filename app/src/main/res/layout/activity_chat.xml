@@ -34,8 +34,11 @@
 
             <FrameLayout
                 android:id="@+id/header_avatar_tile"
-                android:layout_width="44dp"
-                android:layout_height="44dp">
+                android:layout_width="64dp"
+                android:layout_height="64dp"
+                android:clickable="true"
+                android:focusable="true"
+                android:foreground="?attr/selectableItemBackgroundBorderless">
 
                 <com.google.android.material.imageview.ShapeableImageView
                     android:id="@+id/header_avatar"
@@ -50,7 +53,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_gravity="center"
-                    android:textSize="18sp"
+                    android:textSize="24sp"
                     style="@style/TextAppearance.CharChat.AvatarLetter" />
 
             </FrameLayout>
@@ -84,6 +87,7 @@
             android:layout_height="0dp"
             android:layout_weight="1"
             android:clipToPadding="false"
+            android:clipChildren="false"
             android:paddingVertical="8dp"
             android:fadeScrollbars="false"
             android:scrollbars="vertical"

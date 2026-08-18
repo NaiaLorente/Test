@@ -6,7 +6,9 @@
     android:layout_marginHorizontal="16dp"
     android:layout_marginVertical="4dp"
     android:gravity="bottom"
-    android:orientation="horizontal">
+    android:orientation="horizontal"
+    android:clipChildren="false"
+    android:clipToPadding="false">
 
     <FrameLayout
         android:id="@+id/msg_avatar_tile"
@@ -49,6 +51,8 @@
         android:gravity="center_vertical"
         android:paddingHorizontal="16dp"
         android:paddingVertical="14dp"
+        android:clipChildren="false"
+        android:clipToPadding="false"
         android:visibility="gone">
 
         <View

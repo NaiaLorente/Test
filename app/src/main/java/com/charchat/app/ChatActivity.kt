@@ -1,11 +1,14 @@
 package com.charchat.app
 
+import android.app.Dialog
 import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
 import android.view.View
+import android.widget.ImageView
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
@@ -54,6 +57,7 @@ class ChatActivity : AppCompatActivity() {
     private lateinit var character: Character
     private var generationJob: Job? = null
     private var isReady = false
+    private var characterAvatarBitmap: Bitmap? = null
 
     private val messages = mutableListOf<Message>()
     private val lastAssistantMsg = StringBuilder()
@@ -102,6 +106,7 @@ class ChatActivity : AppCompatActivity() {
         sendFab = findViewById(R.id.fab)
 
         sendFab.setOnClickListener { if (isReady) handleUserInput() }
+        headerAvatarTile.setOnClickListener { characterAvatarBitmap?.let { showFullscreenAvatar(it) } }
 
         val loaded = ConversationStore.loadMessages(this, characterId)
         val loadedCharacter = ConversationStore.listCharacters(this).find { it.id == characterId }
@@ -135,6 +140,7 @@ class ChatActivity : AppCompatActivity() {
     private fun applyHeader() {
         headerName.text = character.name.ifBlank { "Unnamed" }
         val bitmap = character.avatarPath?.let { path -> runCatching { BitmapFactory.decodeFile(path) }.getOrNull() }
+        characterAvatarBitmap = bitmap
         if (bitmap != null) {
             headerAvatar.setImageBitmap(bitmap)
             headerAvatar.visibility = View.VISIBLE
@@ -150,6 +156,19 @@ class ChatActivity : AppCompatActivity() {
             messageAdapter.characterAvatar = null
             messageAdapter.characterAvatarStyle = style
         }
+    }
+
+    /** Full-bleed, tap-to-dismiss preview of the character's photo, opened from the chat header. */
+    private fun showFullscreenAvatar(bitmap: Bitmap) {
+        val imageView = ImageView(this).apply {
+            setImageBitmap(bitmap)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setBackgroundColor(getColor(R.color.black))
+        }
+        val dialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+        dialog.setContentView(imageView)
+        imageView.setOnClickListener { dialog.dismiss() }
+        dialog.show()
     }
 
     /**
@@ -290,11 +309,6 @@ class ChatActivity : AppCompatActivity() {
                             messageAdapter.notifyItemChanged(messages.size - 1)
                             userInputEt.isEnabled = true
                             sendFab.isEnabled = true
-
-                            val stats = engine.lastReplyStats()
-                            if (stats.isNotBlank()) {
-                                Toast.makeText(this@ChatActivity, stats, Toast.LENGTH_SHORT).show()
-                            }
                         }
                         persist()
                     }.collect { token ->
