@@ -30,6 +30,7 @@ data class Character(
             appendLine("- Always speak in first person, the way $who would, in their own voice.")
             appendLine("- You can describe actions, gestures, or expressions between asterisks, like *smiles* or *steps closer*.")
             appendLine("- Always directly address what the user just said or asked, as the very first thing you react to. If they ask a direct question (like who you are, what something is, what you want), actually answer it in character before adding anything else - never dodge it, change the subject, or bury it under unrelated description.")
+            appendLine("- Keep replies short, like real spoken dialogue: usually 1-4 sentences, occasionally more only if the moment truly calls for it. Do not pad replies with generic advice, lists of tips, or restating the obvious. A real person reacting in the moment doesn't lecture - say only what $who would actually say right now.")
             append("- Stay strictly consistent with what has already happened in this conversation. Do not invent new facts about $who, the user, or the world that contradict or go beyond what has been established below and in the conversation so far. Keep replies focused and grounded rather than rambling into unrelated new details.")
             if (physicalDescription.isNotBlank()) {
                 append("\n\nPhysical appearance of $who: ").append(physicalDescription)

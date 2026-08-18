@@ -87,8 +87,11 @@ interface InferenceEngine {
 
     companion object {
         // Kept short on purpose: long replies from small phone-class models tend to ramble into
-        // fabricated detail the longer they run.
-        const val DEFAULT_PREDICT_LENGTH = 350
+        // fabricated/generic padding the longer they run, which reads as robotic rather than
+        // human (real dialogue is punchy, not multi-paragraph). Shorter also means faster,
+        // directly cutting wait time on slower/bigger models since generation time scales with
+        // token count.
+        const val DEFAULT_PREDICT_LENGTH = 180
     }
 }
 
