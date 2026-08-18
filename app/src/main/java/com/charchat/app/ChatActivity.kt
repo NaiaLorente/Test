@@ -3,6 +3,7 @@ package com.charchat.app
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
 import android.view.View
 import android.widget.ScrollView
@@ -23,8 +24,10 @@ import com.google.android.material.imageview.ShapeableImageView
 import com.google.android.material.textfield.TextInputEditText
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.onCompletion
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -232,12 +235,27 @@ class ChatActivity : AppCompatActivity() {
             messageAdapter.notifyItemInserted(messages.size - 1)
             persist()
 
+            // A live elapsed-time readout while waiting, so a long wait is visibly "still working"
+            // rather than indistinguishable silence from something actually stuck - and gives a
+            // precise number to report back instead of an estimate like "about 7 minutes".
+            val generationStartMs = SystemClock.elapsedRealtime()
+            val tickerJob = lifecycleScope.launch(Dispatchers.Main) {
+                statusTv.visibility = View.VISIBLE
+                while (isActive) {
+                    val elapsedS = (SystemClock.elapsedRealtime() - generationStartMs) / 1000
+                    statusTv.text = "Thinking... ${elapsedS}s"
+                    delay(1000)
+                }
+            }
+
             generationJob = lifecycleScope.launch(Dispatchers.Default) {
                 engine.sendUserPrompt(userMsg)
                     .onCompletion {
+                        tickerJob.cancel()
                         // Reveal the reply only once generation is fully done, instead of as it's
                         // being written, replacing the thinking indicator with the complete text.
                         withContext(Dispatchers.Main) {
+                            statusTv.visibility = View.GONE
                             val messageCount = messages.size
                             check(messageCount > 0 && !messages[messageCount - 1].isUser)
 
