@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
 import android.view.View
+import android.widget.PopupMenu
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.activity.enableEdgeToEdge
@@ -90,11 +91,32 @@ class CharacterGalleryActivity : AppCompatActivity() {
 
         mainFab.setOnClickListener {
             if (isModelReady) {
-                characterSetup.launch(Intent(this, CharacterSetupActivity::class.java))
+                showAddMenu()
             } else {
                 getContent.launch(arrayOf("*/*"))
             }
         }
+    }
+
+    private fun showAddMenu() {
+        val popup = PopupMenu(this, mainFab)
+        popup.menuInflater.inflate(R.menu.fab_menu, popup.menu)
+        popup.menu.findItem(R.id.action_new_group).isEnabled =
+            ConversationStore.listCharacters(this).size >= MIN_GROUP_SIZE
+        popup.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                R.id.action_new_character -> {
+                    characterSetup.launch(Intent(this, CharacterSetupActivity::class.java))
+                    true
+                }
+                R.id.action_new_group -> {
+                    groupSetup.launch(Intent(this, GroupSetupActivity::class.java))
+                    true
+                }
+                else -> false
+            }
+        }
+        popup.show()
     }
 
     override fun onResume() {
@@ -214,19 +236,25 @@ class CharacterGalleryActivity : AppCompatActivity() {
     }
 
     private fun refreshCharacterList() {
-        val characters = ConversationStore.listCharacters(this)
-        characterCountTv.text = if (characters.size == 1) "1 ready to chat" else "${characters.size} ready to chat"
-        emptyStateTv.visibility = if (characters.isEmpty()) View.VISIBLE else View.GONE
-        charactersRv.visibility = if (characters.isEmpty()) View.GONE else View.VISIBLE
-        charactersRv.adapter = CharacterCardAdapter(
-            characters,
-            onClick = { character -> openChat(character) },
-            onDeleteClick = { character -> confirmDelete(character) }
+        val items = ConversationStore.listGalleryItems(this)
+        characterCountTv.text = if (items.size == 1) "1 ready to chat" else "${items.size} ready to chat"
+        emptyStateTv.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
+        charactersRv.visibility = if (items.isEmpty()) View.GONE else View.VISIBLE
+        charactersRv.adapter = GalleryAdapter(
+            items,
+            onOpenCharacter = { character -> openChat(character) },
+            onOpenGroup = { group -> openGroupChat(group) },
+            onDeleteCharacter = { character -> confirmDelete(character) },
+            onDeleteGroup = { group -> confirmDeleteGroup(group) }
         )
     }
 
     private fun openChat(character: Character) {
         startActivity(Intent(this, ChatActivity::class.java).putExtra(ChatActivity.EXTRA_CHARACTER_ID, character.id))
+    }
+
+    private fun openGroupChat(group: Group) {
+        startActivity(Intent(this, GroupChatActivity::class.java).putExtra(GroupChatActivity.EXTRA_GROUP_ID, group.id))
     }
 
     private fun confirmDelete(character: Character) {
@@ -241,6 +269,18 @@ class CharacterGalleryActivity : AppCompatActivity() {
             .show()
     }
 
+    private fun confirmDeleteGroup(group: Group) {
+        AlertDialog.Builder(this)
+            .setTitle("Delete this group chat?")
+            .setMessage("This will permanently delete the group and its conversation. The characters in it are kept.")
+            .setPositiveButton("Delete") { _, _ ->
+                ConversationStore.deleteGroup(this, group.id)
+                refreshCharacterList()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
     private val characterSetup = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -248,6 +288,15 @@ class CharacterGalleryActivity : AppCompatActivity() {
         val character = Character.fromJson(JSONObject(json))
         ConversationStore.save(this, character, emptyList())
         openChat(character)
+    }
+
+    private val groupSetup = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val json = result.data?.getStringExtra(GroupSetupActivity.EXTRA_GROUP_JSON) ?: return@registerForActivityResult
+        val group = Group.fromJson(JSONObject(json))
+        ConversationStore.saveGroup(this, group, emptyList())
+        openGroupChat(group)
     }
 
     private fun ensureModelsDirectory() =

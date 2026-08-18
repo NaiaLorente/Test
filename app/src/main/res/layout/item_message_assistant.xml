@@ -14,7 +14,8 @@
         android:id="@+id/msg_avatar_tile"
         android:layout_width="32dp"
         android:layout_height="32dp"
-        android:layout_marginEnd="8dp">
+        android:layout_marginEnd="8dp"
+        android:layout_marginBottom="2dp">
 
         <com.google.android.material.imageview.ShapeableImageView
             android:id="@+id/msg_avatar"
@@ -34,46 +35,65 @@
 
     </FrameLayout>
 
-    <TextView
-        android:id="@+id/msg_content"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:background="@drawable/bg_assistant_message"
-        android:padding="12dp"
-        android:textColor="@color/on_background" />
-
     <LinearLayout
-        android:id="@+id/thinking_dots"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:background="@drawable/bg_assistant_message"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:paddingHorizontal="16dp"
-        android:paddingVertical="14dp"
+        android:orientation="vertical"
         android:clipChildren="false"
-        android:clipToPadding="false"
-        android:visibility="gone">
+        android:clipToPadding="false">
 
-        <View
-            android:id="@+id/dot_1"
-            android:layout_width="8dp"
-            android:layout_height="8dp"
-            android:background="@drawable/dot_thinking" />
+        <!-- Group chat only: which character this bubble belongs to. Gone in solo chats. -->
+        <TextView
+            android:id="@+id/msg_speaker_name"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:layout_marginBottom="2dp"
+            android:textColor="@color/on_surface_variant"
+            android:visibility="gone"
+            style="@style/TextAppearance.CharChat.Body.LabelSmall" />
 
-        <View
-            android:id="@+id/dot_2"
-            android:layout_width="8dp"
-            android:layout_height="8dp"
-            android:layout_marginStart="6dp"
-            android:background="@drawable/dot_thinking" />
+        <TextView
+            android:id="@+id/msg_content"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_assistant_message"
+            android:padding="12dp"
+            android:textColor="@color/on_background" />
 
-        <View
-            android:id="@+id/dot_3"
-            android:layout_width="8dp"
-            android:layout_height="8dp"
-            android:layout_marginStart="6dp"
-            android:background="@drawable/dot_thinking" />
+        <LinearLayout
+            android:id="@+id/thinking_dots"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_assistant_message"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="14dp"
+            android:clipChildren="false"
+            android:clipToPadding="false"
+            android:visibility="gone">
 
+            <View
+                android:id="@+id/dot_1"
+                android:layout_width="8dp"
+                android:layout_height="8dp"
+                android:background="@drawable/dot_thinking" />
+
+            <View
+                android:id="@+id/dot_2"
+                android:layout_width="8dp"
+                android:layout_height="8dp"
+                android:layout_marginStart="6dp"
+                android:background="@drawable/dot_thinking" />
+
+            <View
+                android:id="@+id/dot_3"
+                android:layout_width="8dp"
+                android:layout_height="8dp"
+                android:layout_marginStart="6dp"
+                android:background="@drawable/dot_thinking" />
+
+        </LinearLayout>
     </LinearLayout>
 </LinearLayout>

@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:layout_marginEnd="14dp"
+    android:orientation="vertical"
+    android:gravity="center_horizontal"
+    android:background="?attr/selectableItemBackground"
+    android:padding="4dp">
+
+    <FrameLayout
+        android:id="@+id/chip_avatar_tile"
+        android:layout_width="52dp"
+        android:layout_height="52dp">
+
+        <com.google.android.material.imageview.ShapeableImageView
+            android:id="@+id/chip_avatar_photo"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scaleType="centerCrop"
+            android:visibility="gone"
+            app:shapeAppearanceOverlay="@style/CircleImage" />
+
+        <TextView
+            android:id="@+id/chip_avatar_letter"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:textSize="18sp"
+            style="@style/TextAppearance.CharChat.AvatarLetter" />
+
+    </FrameLayout>
+
+    <TextView
+        android:id="@+id/chip_name"
+        android:layout_width="60dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:gravity="center"
+        android:maxLines="1"
+        android:ellipsize="end"
+        android:textColor="@color/on_surface_variant"
+        style="@style/TextAppearance.CharChat.Body.LabelSmall" />
+
+</LinearLayout>

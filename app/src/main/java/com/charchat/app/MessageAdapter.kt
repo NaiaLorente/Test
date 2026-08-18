@@ -5,6 +5,7 @@ import android.animation.ObjectAnimator
 import android.animation.PropertyValuesHolder
 import android.animation.ValueAnimator
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Typeface
 import android.text.Spannable
 import android.text.SpannableStringBuilder
@@ -24,19 +25,25 @@ data class Message(
     val isUser: Boolean,
     // Transient UI state only (a thinking placeholder always has blank content, which persist()
     // already filters out) - never meaningfully round-trips through JSON, but default it safely.
-    val isThinking: Boolean = false
+    val isThinking: Boolean = false,
+    // Which character said this, for a group chat's multiple assistants sharing one conversation.
+    // Always null for a user message and for any message in a solo (single-character) chat, where
+    // the single character is already implied by which conversation this is.
+    val speakerId: String? = null
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
         put("content", content)
         put("isUser", isUser)
+        put("speakerId", speakerId ?: JSONObject.NULL)
     }
 
     companion object {
         fun fromJson(json: JSONObject): Message = Message(
             id = json.optString("id"),
             content = json.optString("content"),
-            isUser = json.optBoolean("isUser")
+            isUser = json.optBoolean("isUser"),
+            speakerId = json.optString("speakerId", "").takeIf { it.isNotBlank() }
         )
 
         fun listToJson(messages: List<Message>): JSONArray =
@@ -95,6 +102,18 @@ class MessageAdapter(
             notifyDataSetChanged()
         }
 
+    /**
+     * Group chat mode: maps each participating character's id to itself, so every assistant
+     * message can look up and show its own speaker's avatar/name instead of the single shared
+     * [characterAvatar]/[characterAvatarStyle] a solo chat uses. Empty (the default) means solo
+     * mode.
+     */
+    var speakers: Map<String, Character> = emptyMap()
+        set(value) {
+            field = value
+            notifyDataSetChanged()
+        }
+
     companion object {
         private const val VIEW_TYPE_USER = 1
         private const val VIEW_TYPE_ASSISTANT = 2
@@ -134,17 +153,34 @@ class MessageAdapter(
             val avatarView = holder.itemView.findViewById<ImageView>(R.id.msg_avatar)
             val avatarLetter = holder.itemView.findViewById<TextView>(R.id.msg_avatar_letter)
             val avatarTile = holder.itemView.findViewById<View>(R.id.msg_avatar_tile)
-            val avatar = characterAvatar
-            if (avatar != null) {
-                avatarView.setImageBitmap(avatar)
+            val nameLabel = holder.itemView.findViewById<TextView>(R.id.msg_speaker_name)
+            val context = holder.itemView.context
+
+            val speaker = message.speakerId?.let { speakers[it] }
+            val bitmap: Bitmap?
+            val style: AvatarStyle?
+            if (speakers.isNotEmpty()) {
+                // Group mode: each message shows its own speaker, falling back to a "?" tile for
+                // an unknown/removed character rather than silently borrowing another one's avatar.
+                // Shown while thinking too, so it's clear who's about to reply.
+                nameLabel.visibility = View.VISIBLE
+                nameLabel.text = speaker?.name?.ifBlank { "Unnamed" } ?: "Unknown"
+                bitmap = speaker?.avatarPath?.let { path -> runCatching { BitmapFactory.decodeFile(path) }.getOrNull() }
+                style = speaker?.avatarStyle()
+            } else {
+                nameLabel.visibility = View.GONE
+                bitmap = characterAvatar
+                style = characterAvatarStyle
+            }
+
+            if (bitmap != null) {
+                avatarView.setImageBitmap(bitmap)
                 avatarView.visibility = View.VISIBLE
                 avatarLetter.visibility = View.GONE
             } else {
-                val style = characterAvatarStyle
                 avatarView.visibility = View.GONE
                 avatarLetter.visibility = View.VISIBLE
                 avatarLetter.text = style?.letter ?: "?"
-                val context = holder.itemView.context
                 avatarLetter.setTextColor(context.getColor(style?.foregroundColorRes ?: R.color.avatar_fg_green))
                 avatarTile.setCircularAvatarBackground(style?.backgroundColorRes ?: R.color.avatar_bg_green)
             }
