@@ -8,16 +8,29 @@
     android:gravity="bottom"
     android:orientation="horizontal">
 
-    <com.google.android.material.imageview.ShapeableImageView
-        android:id="@+id/msg_avatar"
+    <FrameLayout
+        android:id="@+id/msg_avatar_tile"
         android:layout_width="32dp"
         android:layout_height="32dp"
-        android:layout_marginEnd="8dp"
-        android:background="@color/surface_variant"
-        android:padding="6dp"
-        android:scaleType="centerCrop"
-        android:src="@drawable/ic_character_placeholder"
-        app:shapeAppearanceOverlay="@style/CircleImage" />
+        android:layout_marginEnd="8dp">
+
+        <com.google.android.material.imageview.ShapeableImageView
+            android:id="@+id/msg_avatar"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scaleType="centerCrop"
+            android:visibility="gone"
+            app:shapeAppearanceOverlay="@style/CircleImage" />
+
+        <TextView
+            android:id="@+id/msg_avatar_letter"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:textSize="13sp"
+            style="@style/TextAppearance.CharChat.AvatarLetter" />
+
+    </FrameLayout>
 
     <TextView
         android:id="@+id/msg_content"

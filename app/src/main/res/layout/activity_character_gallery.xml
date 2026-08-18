@@ -11,22 +11,88 @@
         android:layout_height="match_parent"
         android:orientation="vertical">
 
-        <com.google.android.material.appbar.MaterialToolbar
-            android:id="@+id/toolbar"
+        <!-- Shown before a model is loaded: centered brand mark, matching the onboarding screen -->
+        <LinearLayout
+            android:id="@+id/brand_header"
             android:layout_width="match_parent"
-            android:layout_height="?attr/actionBarSize"
-            app:title="CharChat"
-            app:titleTextColor="@color/on_background" />
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:paddingHorizontal="32dp">
 
-        <TextView
-            android:id="@+id/status_tv"
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_horizontal"
+                android:text="CharChat"
+                android:textColor="@color/on_background"
+                style="@style/TextAppearance.CharChat.Display"
+                android:textSize="30sp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_horizontal"
+                android:layout_marginTop="6dp"
+                android:gravity="center"
+                android:text="Chat with a character, entirely on your phone."
+                android:textColor="@color/on_surface_variant"
+                style="@style/TextAppearance.CharChat.Body.BodyMedium" />
+
+            <TextView
+                android:id="@+id/status_tv"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_horizontal"
+                android:layout_marginTop="28dp"
+                android:gravity="center"
+                android:textColor="@color/on_surface_variant"
+                style="@style/TextAppearance.CharChat.Body.BodyMedium"
+                android:text="Choose a .gguf model to get started." />
+
+        </LinearLayout>
+
+        <!-- Shown once a model is loaded -->
+        <LinearLayout
+            android:id="@+id/gallery_header"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:orientation="vertical"
             android:paddingHorizontal="20dp"
-            android:paddingVertical="12dp"
-            android:textColor="@color/on_surface_variant"
-            style="@style/TextAppearance.Material3.BodyMedium"
-            android:text="Choose a .gguf model to get started." />
+            android:paddingTop="22dp"
+            android:paddingBottom="10dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/loaded_model_label"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="@color/on_surface_faint"
+                android:textAllCaps="true"
+                android:letterSpacing="0.06"
+                android:maxLines="1"
+                android:ellipsize="end"
+                style="@style/TextAppearance.CharChat.Body.LabelSmall" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="Your characters"
+                android:textColor="@color/on_background"
+                style="@style/TextAppearance.CharChat.Display"
+                android:textSize="24sp" />
+
+            <TextView
+                android:id="@+id/character_count_tv"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:textColor="@color/on_surface_variant"
+                style="@style/TextAppearance.CharChat.Body.BodySmall" />
+
+        </LinearLayout>
 
         <FrameLayout
             android:layout_width="match_parent"
@@ -43,14 +109,14 @@
                 android:text="No characters yet.\nTap + to create your first one."
                 android:textColor="@color/on_surface_variant"
                 android:visibility="gone"
-                style="@style/TextAppearance.Material3.BodyLarge" />
+                style="@style/TextAppearance.CharChat.Body.BodyLarge" />
 
             <androidx.recyclerview.widget.RecyclerView
                 android:id="@+id/characters_rv"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:clipToPadding="false"
-                android:padding="8dp"
+                android:padding="10dp"
                 android:visibility="gone"
                 app:layoutManager="androidx.recyclerview.widget.GridLayoutManager"
                 app:spanCount="2" />

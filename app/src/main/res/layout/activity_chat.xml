@@ -17,9 +17,11 @@
             android:id="@+id/toolbar"
             android:layout_width="match_parent"
             android:layout_height="?attr/actionBarSize"
+            android:background="@color/surface"
             app:navigationIcon="@drawable/ic_back_24"
-            app:navigationIconTint="@color/white"
-            app:menu="@menu/main_menu" />
+            app:navigationIconTint="@color/on_background"
+            app:menu="@menu/main_menu"
+            app:titleTextColor="@color/on_background" />
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -27,18 +29,31 @@
             android:orientation="horizontal"
             android:gravity="center_vertical"
             android:paddingHorizontal="16dp"
-            android:paddingVertical="14dp"
-            android:background="@drawable/gradient_header">
+            android:paddingBottom="14dp"
+            android:background="@color/surface">
 
-            <com.google.android.material.imageview.ShapeableImageView
-                android:id="@+id/header_avatar"
+            <FrameLayout
+                android:id="@+id/header_avatar_tile"
                 android:layout_width="44dp"
-                android:layout_height="44dp"
-                android:background="#33FFFFFF"
-                android:padding="8dp"
-                android:scaleType="centerCrop"
-                android:src="@drawable/ic_character_placeholder"
-                app:shapeAppearanceOverlay="@style/CircleImage" />
+                android:layout_height="44dp">
+
+                <com.google.android.material.imageview.ShapeableImageView
+                    android:id="@+id/header_avatar"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:scaleType="centerCrop"
+                    android:visibility="gone"
+                    app:shapeAppearanceOverlay="@style/CircleImage" />
+
+                <TextView
+                    android:id="@+id/header_avatar_letter"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:textSize="18sp"
+                    style="@style/TextAppearance.CharChat.AvatarLetter" />
+
+            </FrameLayout>
 
             <TextView
                 android:id="@+id/header_name"
@@ -46,11 +61,10 @@
                 android:layout_weight="1"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="12dp"
-                android:textColor="@color/white"
-                android:textStyle="bold"
+                android:textColor="@color/on_background"
                 android:maxLines="1"
                 android:ellipsize="end"
-                style="@style/TextAppearance.Material3.TitleMedium" />
+                style="@style/TextAppearance.CharChat.TitleMedium" />
 
         </LinearLayout>
 
@@ -61,7 +75,7 @@
             android:paddingHorizontal="16dp"
             android:paddingVertical="8dp"
             android:textColor="@color/on_surface_variant"
-            style="@style/TextAppearance.MaterialComponents.Caption"
+            style="@style/TextAppearance.CharChat.Body.Caption"
             android:text="Loading conversation..." />
 
         <androidx.recyclerview.widget.RecyclerView

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Serif italic display type, used for the app name, character names, and section titles -
+         the one deliberately different accent in an otherwise plain sans-serif UI. -->
+    <style name="TextAppearance.CharChat.Display" parent="TextAppearance.Material3.HeadlineSmall">
+        <item name="fontFamily">@font/newsreader_semibold_italic</item>
+        <item name="android:fontFamily">@font/newsreader_semibold_italic</item>
+        <item name="android:letterSpacing">-0.01</item>
+    </style>
+
+    <style name="TextAppearance.CharChat.Title" parent="TextAppearance.Material3.TitleLarge">
+        <item name="fontFamily">@font/newsreader_semibold_italic</item>
+        <item name="android:fontFamily">@font/newsreader_semibold_italic</item>
+    </style>
+
+    <style name="TextAppearance.CharChat.TitleMedium" parent="TextAppearance.Material3.TitleMedium">
+        <item name="fontFamily">@font/newsreader_semibold_italic</item>
+        <item name="android:fontFamily">@font/newsreader_semibold_italic</item>
+    </style>
+
+    <!-- Non-italic serif, used for the big letter glyph on an avatar tile -->
+    <style name="TextAppearance.CharChat.AvatarLetter" parent="TextAppearance.Material3.HeadlineMedium">
+        <item name="fontFamily">@font/newsreader_semibold</item>
+        <item name="android:fontFamily">@font/newsreader_semibold</item>
+    </style>
+</resources>

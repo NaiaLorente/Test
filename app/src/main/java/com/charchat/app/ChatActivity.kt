@@ -41,7 +41,9 @@ import java.util.UUID
 class ChatActivity : AppCompatActivity() {
 
     private lateinit var toolbar: MaterialToolbar
+    private lateinit var headerAvatarTile: View
     private lateinit var headerAvatar: ShapeableImageView
+    private lateinit var headerAvatarLetter: TextView
     private lateinit var headerName: TextView
     private lateinit var statusTv: TextView
     private lateinit var messagesRv: RecyclerView
@@ -88,7 +90,9 @@ class ChatActivity : AppCompatActivity() {
             }
         }
 
+        headerAvatarTile = findViewById(R.id.header_avatar_tile)
         headerAvatar = findViewById(R.id.header_avatar)
+        headerAvatarLetter = findViewById(R.id.header_avatar_letter)
         headerName = findViewById(R.id.header_name)
         statusTv = findViewById(R.id.status_tv)
         messagesRv = findViewById(R.id.messages)
@@ -133,11 +137,18 @@ class ChatActivity : AppCompatActivity() {
         val bitmap = character.avatarPath?.let { path -> runCatching { BitmapFactory.decodeFile(path) }.getOrNull() }
         if (bitmap != null) {
             headerAvatar.setImageBitmap(bitmap)
-            headerAvatar.scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
-            headerAvatar.setPadding(0, 0, 0, 0)
+            headerAvatar.visibility = View.VISIBLE
+            headerAvatarLetter.visibility = View.GONE
             messageAdapter.characterAvatar = bitmap
         } else {
-            headerAvatar.setImageResource(R.drawable.ic_character_placeholder)
+            val style = character.avatarStyle()
+            headerAvatar.visibility = View.GONE
+            headerAvatarLetter.visibility = View.VISIBLE
+            headerAvatarLetter.text = style.letter
+            headerAvatarLetter.setTextColor(getColor(style.foregroundColorRes))
+            headerAvatarTile.setCircularAvatarBackground(style.backgroundColorRes)
+            messageAdapter.characterAvatar = null
+            messageAdapter.characterAvatarStyle = style
         }
     }
 

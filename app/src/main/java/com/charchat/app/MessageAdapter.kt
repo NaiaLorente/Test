@@ -2,6 +2,7 @@ package com.charchat.app
 
 import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
+import android.animation.PropertyValuesHolder
 import android.animation.ValueAnimator
 import android.graphics.Bitmap
 import android.graphics.Typeface
@@ -88,6 +89,12 @@ class MessageAdapter(
             notifyDataSetChanged()
         }
 
+    var characterAvatarStyle: AvatarStyle? = null
+        set(value) {
+            field = value
+            notifyDataSetChanged()
+        }
+
     companion object {
         private const val VIEW_TYPE_USER = 1
         private const val VIEW_TYPE_ASSISTANT = 2
@@ -125,13 +132,21 @@ class MessageAdapter(
             }
 
             val avatarView = holder.itemView.findViewById<ImageView>(R.id.msg_avatar)
+            val avatarLetter = holder.itemView.findViewById<TextView>(R.id.msg_avatar_letter)
+            val avatarTile = holder.itemView.findViewById<View>(R.id.msg_avatar_tile)
             val avatar = characterAvatar
             if (avatar != null) {
                 avatarView.setImageBitmap(avatar)
-                avatarView.scaleType = ImageView.ScaleType.CENTER_CROP
-                avatarView.setPadding(0, 0, 0, 0)
+                avatarView.visibility = View.VISIBLE
+                avatarLetter.visibility = View.GONE
             } else {
-                avatarView.setImageResource(R.drawable.ic_character_placeholder)
+                val style = characterAvatarStyle
+                avatarView.visibility = View.GONE
+                avatarLetter.visibility = View.VISIBLE
+                avatarLetter.text = style?.letter ?: "?"
+                val context = holder.itemView.context
+                avatarLetter.setTextColor(context.getColor(style?.foregroundColorRes ?: R.color.avatar_fg_green))
+                avatarTile.setCircularAvatarBackground(style?.backgroundColorRes ?: R.color.avatar_bg_green)
             }
         } else {
             contentView.text = styleRoleplayText(message.content)
@@ -160,8 +175,11 @@ class MessageAdapter(
 
         fun startThinkingAnimation() {
             if (animatorSet?.isRunning == true) return
+            val bounceDp = dots.first().resources.displayMetrics.density * -3f
             val animators = dots.mapIndexed { index, dot ->
-                ObjectAnimator.ofFloat(dot, View.ALPHA, 0.3f, 1f, 0.3f).apply {
+                val alpha = PropertyValuesHolder.ofFloat(View.ALPHA, 0.25f, 1f, 0.25f)
+                val translateY = PropertyValuesHolder.ofFloat(View.TRANSLATION_Y, 0f, bounceDp, 0f)
+                ObjectAnimator.ofPropertyValuesHolder(dot, alpha, translateY).apply {
                     duration = 900
                     startDelay = index * 150L
                     repeatCount = ValueAnimator.INFINITE
@@ -176,7 +194,10 @@ class MessageAdapter(
         fun stopThinkingAnimation() {
             animatorSet?.cancel()
             animatorSet = null
-            dots.forEach { it.alpha = 1f }
+            dots.forEach {
+                it.alpha = 1f
+                it.translationY = 0f
+            }
         }
     }
 }

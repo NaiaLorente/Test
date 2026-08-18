@@ -20,7 +20,8 @@
             android:layout_marginBottom="4dp"
             android:text="Create your character"
             android:textColor="@color/on_background"
-            style="@style/TextAppearance.Material3.HeadlineSmall" />
+            android:textSize="22sp"
+            style="@style/TextAppearance.CharChat.Display" />
 
         <TextView
             android:layout_width="match_parent"
@@ -28,7 +29,7 @@
             android:layout_marginBottom="20dp"
             android:text="The more detail you give, the better it will stay in character."
             android:textColor="@color/on_surface_variant"
-            style="@style/TextAppearance.Material3.BodyMedium" />
+            style="@style/TextAppearance.CharChat.Body.BodyMedium" />
 
         <com.google.android.material.imageview.ShapeableImageView
             android:id="@+id/avatar_image"
@@ -49,7 +50,7 @@
             android:layout_marginBottom="20dp"
             android:text="Tap to choose a photo"
             android:textColor="@color/primary"
-            style="@style/TextAppearance.Material3.LabelLarge" />
+            style="@style/TextAppearance.CharChat.Body.LabelLarge" />
 
         <com.google.android.material.textfield.TextInputLayout
             android:layout_width="match_parent"
@@ -151,7 +152,7 @@
                 android:layout_height="wrap_content"
                 android:text="Creativity"
                 android:textColor="@color/on_background"
-                style="@style/TextAppearance.Material3.TitleMedium" />
+                style="@style/TextAppearance.CharChat.Body.TitleMedium" />
 
             <TextView
                 android:id="@+id/creativity_label"
@@ -159,7 +160,7 @@
                 android:layout_height="wrap_content"
                 android:textColor="@color/primary"
                 android:textStyle="bold"
-                style="@style/TextAppearance.Material3.TitleMedium" />
+                style="@style/TextAppearance.CharChat.Body.TitleMedium" />
 
         </LinearLayout>
 
@@ -169,7 +170,7 @@
             android:layout_height="wrap_content"
             android:layout_marginBottom="4dp"
             android:textColor="@color/on_surface_variant"
-            style="@style/TextAppearance.Material3.BodySmall" />
+            style="@style/TextAppearance.CharChat.Body.BodySmall" />
 
         <com.google.android.material.slider.Slider
             android:id="@+id/creativity_slider"

@@ -20,7 +20,6 @@ import com.arm.aichat.InferenceEngine
 import com.arm.aichat.NATIVE_CRASH_LOG_FILE_NAME
 import com.arm.aichat.gguf.GgufMetadata
 import com.arm.aichat.gguf.GgufMetadataReader
-import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -40,8 +39,11 @@ import java.io.InputStream
  */
 class CharacterGalleryActivity : AppCompatActivity() {
 
-    private lateinit var toolbar: MaterialToolbar
+    private lateinit var brandHeader: View
+    private lateinit var galleryHeader: View
+    private lateinit var loadedModelLabel: TextView
     private lateinit var statusTv: TextView
+    private lateinit var characterCountTv: TextView
     private lateinit var emptyStateTv: TextView
     private lateinit var charactersRv: RecyclerView
     private lateinit var mainFab: FloatingActionButton
@@ -55,8 +57,11 @@ class CharacterGalleryActivity : AppCompatActivity() {
         setContentView(R.layout.activity_character_gallery)
         findViewById<View>(R.id.gallery_root).applySystemBarInsetsAsPadding()
 
-        toolbar = findViewById(R.id.toolbar)
+        brandHeader = findViewById(R.id.brand_header)
+        galleryHeader = findViewById(R.id.gallery_header)
+        loadedModelLabel = findViewById(R.id.loaded_model_label)
         statusTv = findViewById(R.id.status_tv)
+        characterCountTv = findViewById(R.id.character_count_tv)
         emptyStateTv = findViewById(R.id.empty_state_tv)
         charactersRv = findViewById(R.id.characters_rv)
         charactersRv.layoutManager = GridLayoutManager(this, 2)
@@ -75,7 +80,9 @@ class CharacterGalleryActivity : AppCompatActivity() {
                 // A model is already loaded in the shared singleton engine (e.g. this screen was
                 // recreated after being backgrounded, or a chat screen bounced back here) -
                 // calling loadModel() again would throw, since it requires the Initialized state.
-                withContext(Dispatchers.Main) { onModelReady() }
+                val modelName = ensureModelsDirectory().listFiles { f -> f.extension == "gguf" }
+                    ?.maxByOrNull { it.lastModified() }?.name
+                withContext(Dispatchers.Main) { onModelReady(modelName) }
             } else {
                 withContext(Dispatchers.Main) { resumeOrPickModel() }
             }
@@ -130,7 +137,7 @@ class CharacterGalleryActivity : AppCompatActivity() {
         if (existingModel != null) {
             lifecycleScope.launch(Dispatchers.IO) {
                 loadModelWithTicker(existingModel.name, existingModel.path)
-                withContext(Dispatchers.Main) { onModelReady() }
+                withContext(Dispatchers.Main) { onModelReady(existingModel.name) }
             }
         } else {
             statusTv.text = "Choose a .gguf model to get started."
@@ -178,7 +185,7 @@ class CharacterGalleryActivity : AppCompatActivity() {
                     ensureModelFile(modelName, input)
                 }?.let { modelFile ->
                     loadModelWithTicker(modelFile.name, modelFile.path)
-                    withContext(Dispatchers.Main) { onModelReady() }
+                    withContext(Dispatchers.Main) { onModelReady(modelFile.name) }
                 }
             }
         }
@@ -196,9 +203,11 @@ class CharacterGalleryActivity : AppCompatActivity() {
             }
         }
 
-    private fun onModelReady() {
+    private fun onModelReady(modelName: String? = null) {
         isModelReady = true
-        statusTv.visibility = View.GONE
+        modelName?.let { loadedModelLabel.text = it }
+        brandHeader.visibility = View.GONE
+        galleryHeader.visibility = View.VISIBLE
         mainFab.setImageResource(R.drawable.ic_add_24)
         mainFab.isEnabled = true
         refreshCharacterList()
@@ -206,12 +215,13 @@ class CharacterGalleryActivity : AppCompatActivity() {
 
     private fun refreshCharacterList() {
         val characters = ConversationStore.listCharacters(this)
+        characterCountTv.text = if (characters.size == 1) "1 ready to chat" else "${characters.size} ready to chat"
         emptyStateTv.visibility = if (characters.isEmpty()) View.VISIBLE else View.GONE
         charactersRv.visibility = if (characters.isEmpty()) View.GONE else View.VISIBLE
         charactersRv.adapter = CharacterCardAdapter(
             characters,
             onClick = { character -> openChat(character) },
-            onLongClick = { character -> confirmDelete(character) }
+            onDeleteClick = { character -> confirmDelete(character) }
         )
     }
 

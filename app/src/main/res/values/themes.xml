@@ -12,6 +12,53 @@
         <item name="colorOnSurfaceVariant">@color/on_surface_variant</item>
         <item name="android:statusBarColor">@color/background</item>
         <item name="android:navigationBarColor">@color/background</item>
+        <item name="fontFamily">@font/jakarta_regular</item>
+        <item name="android:fontFamily">@font/jakarta_regular</item>
+        <item name="textAppearanceHeadlineSmall">@style/TextAppearance.CharChat.Body.HeadlineSmall</item>
+        <item name="textAppearanceTitleLarge">@style/TextAppearance.CharChat.Body.TitleLarge</item>
+        <item name="textAppearanceTitleMedium">@style/TextAppearance.CharChat.Body.TitleMedium</item>
+        <item name="textAppearanceBodyLarge">@style/TextAppearance.CharChat.Body.BodyLarge</item>
+        <item name="textAppearanceBodyMedium">@style/TextAppearance.CharChat.Body.BodyMedium</item>
+        <item name="textAppearanceBodySmall">@style/TextAppearance.CharChat.Body.BodySmall</item>
+        <item name="textAppearanceLabelLarge">@style/TextAppearance.CharChat.Body.LabelLarge</item>
+        <item name="textAppearanceLabelSmall">@style/TextAppearance.CharChat.Body.LabelSmall</item>
+    </style>
+
+    <style name="TextAppearance.CharChat.Body.HeadlineSmall" parent="TextAppearance.Material3.HeadlineSmall">
+        <item name="fontFamily">@font/jakarta_semibold</item>
+        <item name="android:fontFamily">@font/jakarta_semibold</item>
+    </style>
+    <style name="TextAppearance.CharChat.Body.TitleLarge" parent="TextAppearance.Material3.TitleLarge">
+        <item name="fontFamily">@font/jakarta_semibold</item>
+        <item name="android:fontFamily">@font/jakarta_semibold</item>
+    </style>
+    <style name="TextAppearance.CharChat.Body.TitleMedium" parent="TextAppearance.Material3.TitleMedium">
+        <item name="fontFamily">@font/jakarta_semibold</item>
+        <item name="android:fontFamily">@font/jakarta_semibold</item>
+    </style>
+    <style name="TextAppearance.CharChat.Body.BodyLarge" parent="TextAppearance.Material3.BodyLarge">
+        <item name="fontFamily">@font/jakarta_regular</item>
+        <item name="android:fontFamily">@font/jakarta_regular</item>
+    </style>
+    <style name="TextAppearance.CharChat.Body.BodyMedium" parent="TextAppearance.Material3.BodyMedium">
+        <item name="fontFamily">@font/jakarta_regular</item>
+        <item name="android:fontFamily">@font/jakarta_regular</item>
+    </style>
+    <style name="TextAppearance.CharChat.Body.BodySmall" parent="TextAppearance.Material3.BodySmall">
+        <item name="fontFamily">@font/jakarta_regular</item>
+        <item name="android:fontFamily">@font/jakarta_regular</item>
+    </style>
+    <style name="TextAppearance.CharChat.Body.LabelLarge" parent="TextAppearance.Material3.LabelLarge">
+        <item name="fontFamily">@font/jakarta_medium</item>
+        <item name="android:fontFamily">@font/jakarta_medium</item>
+    </style>
+    <style name="TextAppearance.CharChat.Body.LabelSmall" parent="TextAppearance.Material3.LabelSmall">
+        <item name="fontFamily">@font/jakarta_medium</item>
+        <item name="android:fontFamily">@font/jakarta_medium</item>
+    </style>
+    <style name="TextAppearance.CharChat.Body.Caption" parent="TextAppearance.MaterialComponents.Caption">
+        <item name="fontFamily">@font/jakarta_regular</item>
+        <item name="android:fontFamily">@font/jakarta_regular</item>
     </style>
 
     <style name="Theme.AiChatSample" parent="Base.Theme.AiChatSample" />

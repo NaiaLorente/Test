@@ -1,21 +1,41 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="background">#120F1C</color>
-    <color name="surface">#1D1830</color>
-    <color name="surface_variant">#2A2242</color>
-    <color name="on_background">#F5F0FF</color>
-    <color name="on_surface_variant">#BBAED8</color>
+    <!-- Warm dark neutrals -->
+    <color name="background">#100C0A</color>
+    <color name="surface">#1A1512</color>
+    <color name="surface_high">#241E1A</color>
+    <color name="surface_highest">#2E2723</color>
+    <color name="surface_variant">#1A1512</color>
 
-    <color name="primary">#B383FF</color>
-    <color name="on_primary">#1A1023</color>
-    <color name="accent">#FF6FA5</color>
-    <color name="gradient_start">#9C6BFF</color>
-    <color name="gradient_end">#FF6FA5</color>
+    <color name="on_background">#F2EDEB</color>
+    <color name="on_surface_variant">#98908B</color>
+    <color name="on_surface_faint">#76706C</color>
+    <color name="outline_dashed">#4D4642</color>
 
-    <color name="user_bubble">#8A5CFF</color>
-    <color name="assistant_bubble">#241D3C</color>
+    <!-- Sage-green accent -->
+    <color name="primary">#72BA63</color>
+    <color name="primary_bright">#89CC7B</color>
+    <color name="on_primary">#061005</color>
 
-    <color name="card_overlay">#CC0F0A1C</color>
+    <color name="accent">#FFA299</color>
+    <color name="gradient_start">#72BA63</color>
+    <color name="gradient_end">#89CC7B</color>
+
+    <color name="user_bubble">#263F21</color>
+    <color name="on_user_bubble">#EBF5E9</color>
+    <color name="assistant_bubble">#241E1A</color>
+
+    <!-- Alternating character-avatar letter tiles -->
+    <color name="avatar_bg_green">#213A1C</color>
+    <color name="avatar_fg_green">#96D987</color>
+    <color name="avatar_bg_coral">#4D2623</color>
+    <color name="avatar_fg_coral">#FFA299</color>
+
+    <color name="destructive">#551112</color>
+    <color name="on_destructive">#FCEAE8</color>
+
+    <color name="card_overlay">#CC050201</color>
+    <color name="scrim">#A6080604</color>
 
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
