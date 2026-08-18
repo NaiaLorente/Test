@@ -3,6 +3,7 @@ package com.charchat.app
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
 import android.view.View
 import android.widget.ScrollView
@@ -22,7 +23,9 @@ import com.arm.aichat.gguf.GgufMetadataReader
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -125,13 +128,35 @@ class CharacterGalleryActivity : AppCompatActivity() {
             ?.maxByOrNull { it.lastModified() }
 
         if (existingModel != null) {
-            statusTv.text = "Loading ${existingModel.name}..."
             lifecycleScope.launch(Dispatchers.IO) {
-                engine.loadModel(existingModel.path)
+                loadModelWithTicker(existingModel.name, existingModel.path)
                 withContext(Dispatchers.Main) { onModelReady() }
             }
         } else {
             statusTv.text = "Choose a .gguf model to get started."
+        }
+    }
+
+    /**
+     * Loading the model itself (reading the file, building its context/compute buffers) is a
+     * separate, earlier step from setting up a conversation - and can be where a slow/misbehaving
+     * model actually gets stuck, as happened with one Stheno-8B quant. A live "Loading X... Ys"
+     * readout here gives a precise number to report back instead of an open-ended wait with no
+     * way to tell "still working" from "hung".
+     */
+    private suspend fun loadModelWithTicker(modelName: String, modelPath: String) {
+        val startMs = SystemClock.elapsedRealtime()
+        val tickerJob = lifecycleScope.launch(Dispatchers.Main) {
+            while (isActive) {
+                val elapsedS = (SystemClock.elapsedRealtime() - startMs) / 1000
+                statusTv.text = "Loading $modelName... ${elapsedS}s"
+                delay(1000)
+            }
+        }
+        try {
+            engine.loadModel(modelPath)
+        } finally {
+            tickerJob.cancel()
         }
     }
 
@@ -152,8 +177,7 @@ class CharacterGalleryActivity : AppCompatActivity() {
                 contentResolver.openInputStream(uri)?.use { input ->
                     ensureModelFile(modelName, input)
                 }?.let { modelFile ->
-                    withContext(Dispatchers.Main) { statusTv.text = "Loading the model..." }
-                    engine.loadModel(modelFile.path)
+                    loadModelWithTicker(modelFile.name, modelFile.path)
                     withContext(Dispatchers.Main) { onModelReady() }
                 }
             }
