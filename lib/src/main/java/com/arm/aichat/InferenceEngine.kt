@@ -50,6 +50,12 @@ interface InferenceEngine {
     fun sendUserPrompt(message: String, predictLength: Int = DEFAULT_PREDICT_LENGTH): Flow<String>
 
     /**
+     * Human-readable speed summary for the reply [sendUserPrompt] most recently completed, e.g.
+     * "42 tokens in 18.3s (2.30 tok/s)". Empty until the first reply finishes.
+     */
+    fun lastReplyStats(): String
+
+    /**
      * Runs a benchmark with the specified parameters.
      */
     suspend fun bench(pp: Int, tg: Int, pl: Int, nr: Int = 1): String

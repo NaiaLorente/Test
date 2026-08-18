@@ -120,6 +120,18 @@ internal class InferenceEngineImpl private constructor(
     @FastNative
     private external fun generateNextToken(): String?
 
+    /**
+     * The finished reply's clean text, valid only after [generateNextToken] has returned null.
+     * Nothing is streamed token-by-token anymore (see [sendUserPrompt]): the reply is only
+     * revealed once generation completes, so it's fetched once here instead.
+     */
+    @FastNative
+    private external fun getLastReplyNative(): String
+
+    /** Human-readable speed summary for the last reply, e.g. "42 tokens in 18.3s (2.30 tok/s)". */
+    @FastNative
+    private external fun getLastReplyStatsNative(): String
+
     @FastNative
     private external fun unload()
 
@@ -326,15 +338,17 @@ internal class InferenceEngineImpl private constructor(
 
             Log.i(TAG, "User prompt processed. Generating assistant prompt...")
             _state.value = InferenceEngine.State.Generating
+            // Nothing is emitted per-token anymore: the reply is only revealed once generation
+            // is fully done (see ChatActivity's thinking indicator), so tokens just drive the
+            // loop here and the complete, reasoning-stripped text is fetched once at the end.
             while (!_cancelGeneration) {
-                generateNextToken()?.let { utf8token ->
-                    if (utf8token.isNotEmpty()) emit(utf8token)
-                } ?: break
+                if (generateNextToken() == null) break
             }
             if (_cancelGeneration) {
                 Log.i(TAG, "Assistant generation aborted per requested.")
             } else {
-                Log.i(TAG, "Assistant generation complete. Awaiting user prompt...")
+                Log.i(TAG, "Assistant generation complete: ${getLastReplyStatsNative()}")
+                emit(getLastReplyNative())
             }
             _state.value = InferenceEngine.State.ModelReady
         } catch (e: CancellationException) {
@@ -347,6 +361,8 @@ internal class InferenceEngineImpl private constructor(
             throw e
         }
     }.flowOn(llamaDispatcher)
+
+    override fun lastReplyStats(): String = runCatching { getLastReplyStatsNative() }.getOrDefault("")
 
     /**
      * Benchmark the model

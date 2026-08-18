@@ -2,6 +2,7 @@
 #include <jni.h>
 #include <iomanip>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <csignal>
@@ -661,21 +662,25 @@ static int shift_context() {
  * Completion loop's short-term states:
  * - stop generation position
  * - token chars caching
- * - raw text generated so far this turn, and the parsed "visible" content already streamed out
- *   (see current_visible_content() and visible_content_delta())
+ * - raw text generated so far this turn (only parsed once, at the end - see
+ *   current_visible_content() and finalize_assistant_turn())
+ * - timing/count stats for the turn, so actual speed can be surfaced to the user instead of
+ *   guessed at (see getLastReplyStatsNative())
  */
 static llama_pos   stop_generation_position;
 static std::string cached_token_chars;
 static std::string g_raw_generated;
-static std::string g_emitted_visible_text;
 static bool         g_parse_failed_this_turn;
+static int64_t      g_generation_start_us;
+static int          g_generated_token_count;
 
 static void reset_short_term_states() {
     stop_generation_position = 0;
     cached_token_chars.clear();
     g_raw_generated.clear();
-    g_emitted_visible_text.clear();
     g_parse_failed_this_turn = false;
+    g_generation_start_us = ggml_time_us();
+    g_generated_token_count = 0;
 }
 
 /**
@@ -703,35 +708,48 @@ static std::string current_visible_content(bool is_partial) {
     }
 }
 
-/**
- * Computes the newly-visible suffix since the last token, updating g_emitted_visible_text.
- * Partial parsing can occasionally revise its interpretation of already-generated text as more
- * tokens arrive (not just grow it by appending) - a naive length-based diff would then compute a
- * bogus substring straddling the revision, silently corrupting/truncating the streamed reply.
- * Only emit a delta when `visible` is confirmed to still start with everything already streamed;
- * otherwise skip this token's output and wait for the interpretation to stabilize, rather than
- * emitting text that doesn't actually correspond to what was generated.
- */
-static std::string visible_content_delta(const std::string &visible) {
-    if (visible.size() > g_emitted_visible_text.size() &&
-        visible.compare(0, g_emitted_visible_text.size(), g_emitted_visible_text) == 0) {
-        const std::string delta = visible.substr(g_emitted_visible_text.size());
-        g_emitted_visible_text = visible;
-        return delta;
-    }
-    return "";
-}
+// Last completed reply's clean text and a human-readable speed summary, surfaced to Kotlin via
+// getLastReplyNative()/getLastReplyStatsNative() so actual generation speed can be shown to the
+// user instead of guessed at from the outside.
+static std::string g_last_reply;
+static std::string g_last_reply_stats;
 
 /**
  * Finalizes the assistant's turn regardless of *why* generation stopped (natural end-of-message,
  * or hitting the token-length cap): stores the clean reply into chat history and marks its end
  * position. Without this, a reply cut short by the length cap would never get recorded, leaving
- * future turns' chat-template rendering silently missing this message.
+ * future turns' chat-template rendering silently missing this message. The reasoning-aware parse
+ * only runs once here, at the end, rather than on every token during generation - nothing is
+ * shown to the user until the reply is complete anyway (see ChatActivity's thinking indicator),
+ * so re-parsing the whole growing reply on every single token was pure wasted CPU time that
+ * only got more expensive the longer a reply ran.
  */
 static void finalize_assistant_turn(const char *reason) {
-    LOGw("%s: STOP: %s", __func__, reason);
-    chat_add_and_format(ROLE_ASSISTANT, current_visible_content(/* is_partial */ false));
+    const double elapsed_s = (double) (ggml_time_us() - g_generation_start_us) / 1e6;
+    const double tok_per_s = elapsed_s > 0 ? g_generated_token_count / elapsed_s : 0.0;
+    LOGw("%s: STOP: %s (%d tokens in %.1fs, %.2f tok/s)",
+         __func__, reason, g_generated_token_count, elapsed_s, tok_per_s);
+
+    g_last_reply = current_visible_content(/* is_partial */ false);
+    std::ostringstream stats;
+    stats << g_generated_token_count << " tokens in " << std::fixed << std::setprecision(1) << elapsed_s
+          << "s (" << std::setprecision(2) << tok_per_s << " tok/s)";
+    g_last_reply_stats = stats.str();
+
+    chat_add_and_format(ROLE_ASSISTANT, g_last_reply);
     mark_message_end(current_position);
+}
+
+extern "C"
+JNIEXPORT jstring JNICALL
+Java_com_arm_aichat_internal_InferenceEngineImpl_getLastReplyNative(JNIEnv *env, jobject /*unused*/) {
+    return env->NewStringUTF(g_last_reply.c_str());
+}
+
+extern "C"
+JNIEXPORT jstring JNICALL
+Java_com_arm_aichat_internal_InferenceEngineImpl_getLastReplyStatsNative(JNIEnv *env, jobject /*unused*/) {
+    return env->NewStringUTF(g_last_reply_stats.c_str());
 }
 
 static int decode_tokens_in_batches(
@@ -889,7 +907,9 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_processUserPrompt(
     // Update position
     current_position += user_prompt_size;
     mark_message_end(current_position);
-    stop_generation_position = current_position + user_prompt_size + n_predict;
+    // current_position already includes user_prompt_size (just added above) - the reply's token
+    // budget is n_predict tokens from here, not n_predict + another full copy of the prompt size.
+    stop_generation_position = current_position + n_predict;
     return 0;
 } catch (const std::exception &e) {
     LOGe("%s: uncaught exception: %s", __func__, e.what());
@@ -1059,12 +1079,12 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_generateNextToken(
     LOGv("id: %d,\tcached: `%s`,\tnew: `%s`", new_token_id, cached_token_chars.c_str(), new_token_chars.c_str());
     g_raw_generated += cached_token_chars;
     cached_token_chars.clear();
+    g_generated_token_count++;
 
-    // Only emit what's newly visible since the last token (the diff), which is empty for as long
-    // as generation is still inside a reasoning section the parser recognizes, or while a partial
-    // interpretation is still being revised (see visible_content_delta()).
-    const std::string delta = visible_content_delta(current_visible_content(/* is_partial */ true));
-    return env->NewStringUTF(delta.c_str());
+    // Nothing is shown to the user until the reply is complete (see ChatActivity's thinking
+    // indicator), so there's no reason to pay for re-parsing the whole growing reply on every
+    // token here - that only happens once, in finalize_assistant_turn(), when it actually matters.
+    return env->NewStringUTF("");
 } catch (const std::exception &e) {
     LOGe("%s: uncaught exception: %s", __func__, e.what());
     g_last_error = e.what();

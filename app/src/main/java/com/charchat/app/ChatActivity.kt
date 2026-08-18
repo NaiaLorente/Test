@@ -249,6 +249,11 @@ class ChatActivity : AppCompatActivity() {
                             messageAdapter.notifyItemChanged(messages.size - 1)
                             userInputEt.isEnabled = true
                             sendFab.isEnabled = true
+
+                            val stats = engine.lastReplyStats()
+                            if (stats.isNotBlank()) {
+                                Toast.makeText(this@ChatActivity, stats, Toast.LENGTH_SHORT).show()
+                            }
                         }
                         persist()
                     }.collect { token ->
