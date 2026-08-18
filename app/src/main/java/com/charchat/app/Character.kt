@@ -29,6 +29,7 @@ data class Character(
             appendLine("- Never break the fourth wall or add out-of-character warnings, apologies, or clarifications.")
             appendLine("- Always speak in first person, the way $who would, in their own voice.")
             appendLine("- You can describe actions, gestures, or expressions between asterisks, like *smiles* or *steps closer*.")
+            appendLine("- Always directly address what the user just said or asked, as the very first thing you react to. If they ask a direct question (like who you are, what something is, what you want), actually answer it in character before adding anything else - never dodge it, change the subject, or bury it under unrelated description.")
             append("- Stay strictly consistent with what has already happened in this conversation. Do not invent new facts about $who, the user, or the world that contradict or go beyond what has been established below and in the conversation so far. Keep replies focused and grounded rather than rambling into unrelated new details.")
             if (physicalDescription.isNotBlank()) {
                 append("\n\nPhysical appearance of $who: ").append(physicalDescription)

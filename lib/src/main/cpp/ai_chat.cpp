@@ -661,20 +661,20 @@ static int shift_context() {
  * Completion loop's short-term states:
  * - stop generation position
  * - token chars caching
- * - raw text generated so far this turn, and how much of its parsed "visible" content has
- *   already been streamed out (see current_visible_content())
+ * - raw text generated so far this turn, and the parsed "visible" content already streamed out
+ *   (see current_visible_content() and visible_content_delta())
  */
 static llama_pos   stop_generation_position;
 static std::string cached_token_chars;
 static std::string g_raw_generated;
-static size_t       g_emitted_visible_len;
+static std::string g_emitted_visible_text;
 static bool         g_parse_failed_this_turn;
 
 static void reset_short_term_states() {
     stop_generation_position = 0;
     cached_token_chars.clear();
     g_raw_generated.clear();
-    g_emitted_visible_len = 0;
+    g_emitted_visible_text.clear();
     g_parse_failed_this_turn = false;
 }
 
@@ -701,6 +701,25 @@ static std::string current_visible_content(bool is_partial) {
         g_parse_failed_this_turn = true;
         return g_raw_generated;
     }
+}
+
+/**
+ * Computes the newly-visible suffix since the last token, updating g_emitted_visible_text.
+ * Partial parsing can occasionally revise its interpretation of already-generated text as more
+ * tokens arrive (not just grow it by appending) - a naive length-based diff would then compute a
+ * bogus substring straddling the revision, silently corrupting/truncating the streamed reply.
+ * Only emit a delta when `visible` is confirmed to still start with everything already streamed;
+ * otherwise skip this token's output and wait for the interpretation to stabilize, rather than
+ * emitting text that doesn't actually correspond to what was generated.
+ */
+static std::string visible_content_delta(const std::string &visible) {
+    if (visible.size() > g_emitted_visible_text.size() &&
+        visible.compare(0, g_emitted_visible_text.size(), g_emitted_visible_text) == 0) {
+        const std::string delta = visible.substr(g_emitted_visible_text.size());
+        g_emitted_visible_text = visible;
+        return delta;
+    }
+    return "";
 }
 
 static int decode_tokens_in_batches(
@@ -1032,13 +1051,9 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_generateNextToken(
     cached_token_chars.clear();
 
     // Only emit what's newly visible since the last token (the diff), which is empty for as long
-    // as generation is still inside a reasoning section the parser recognizes.
-    const std::string visible = current_visible_content(/* is_partial */ true);
-    std::string delta;
-    if (visible.size() > g_emitted_visible_len) {
-        delta = visible.substr(g_emitted_visible_len);
-        g_emitted_visible_len = visible.size();
-    }
+    // as generation is still inside a reasoning section the parser recognizes, or while a partial
+    // interpretation is still being revised (see visible_content_delta()).
+    const std::string delta = visible_content_delta(current_visible_content(/* is_partial */ true));
     return env->NewStringUTF(delta.c_str());
 } catch (const std::exception &e) {
     LOGe("%s: uncaught exception: %s", __func__, e.what());
