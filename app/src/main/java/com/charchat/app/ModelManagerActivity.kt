@@ -182,34 +182,45 @@ class ModelManagerActivity : AppCompatActivity() {
         statusTv.text = "Reading the model..."
 
         lifecycleScope.launch(Dispatchers.IO) {
-            Log.i(TAG, "Parsing GGUF metadata...")
-            val modelFile = contentResolver.openInputStream(uri)?.use {
-                GgufMetadataReader.create().readStructuredMetadata(it)
-            }?.let { metadata ->
-                val modelName = metadata.filename() + FILE_EXTENSION_GGUF
-                contentResolver.openInputStream(uri)?.use { input -> ensureModelFile(modelName, input) }
-            }
+            try {
+                Log.i(TAG, "Parsing GGUF metadata...")
+                val modelFile = contentResolver.openInputStream(uri)?.use {
+                    GgufMetadataReader.create().readStructuredMetadata(it)
+                }?.let { metadata ->
+                    val modelName = metadata.filename() + FILE_EXTENSION_GGUF
+                    contentResolver.openInputStream(uri)?.use { input -> ensureModelFile(modelName, input) }
+                }
 
-            if (modelFile == null) {
+                if (modelFile == null) {
+                    withContext(Dispatchers.Main) {
+                        statusTv.text = "Couldn't read that file as a GGUF model."
+                        isBusy = false
+                        addFab.isEnabled = true
+                    }
+                    return@launch
+                }
+
+                if (engine.state.value is InferenceEngine.State.ModelReady) {
+                    withContext(Dispatchers.Main) {
+                        isBusy = false
+                        switchTo(modelFile)
+                    }
+                } else {
+                    withContext(Dispatchers.Main) {
+                        statusTv.text = "Added ${modelFile.name}. Switch to it once the current reply finishes."
+                        isBusy = false
+                        addFab.isEnabled = true
+                        refreshList()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to add the selected model", e)
+                val detail = "${e.javaClass.simpleName}: ${e.message}\n\n${e.stackTraceToString()}"
                 withContext(Dispatchers.Main) {
-                    statusTv.text = "Couldn't read that file as a GGUF model."
+                    statusTv.text = "Error adding the model."
                     isBusy = false
                     addFab.isEnabled = true
-                }
-                return@launch
-            }
-
-            if (engine.state.value is InferenceEngine.State.ModelReady) {
-                withContext(Dispatchers.Main) {
-                    isBusy = false
-                    switchTo(modelFile)
-                }
-            } else {
-                withContext(Dispatchers.Main) {
-                    statusTv.text = "Added ${modelFile.name}. Switch to it once the current reply finishes."
-                    isBusy = false
-                    addFab.isEnabled = true
-                    refreshList()
+                    showErrorDetailsDialog(detail, title = "Error adding model")
                 }
             }
         }

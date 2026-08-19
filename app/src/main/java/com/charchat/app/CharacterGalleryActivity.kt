@@ -161,6 +161,25 @@ class CharacterGalleryActivity : AppCompatActivity() {
             .show()
     }
 
+    /**
+     * A fleeting Toast isn't enough to actually report a model-load error back - there's no PC or
+     * adb access to pull it from logcat otherwise. Show it as selectable text instead so it can be
+     * copied and sent along with a bug report.
+     */
+    private fun showErrorDetailsDialog(detail: String, title: String) {
+        val textView = TextView(this).apply {
+            text = detail
+            setTextIsSelectable(true)
+            setPadding(48, 32, 48, 32)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setMessage("Long-press to select and copy the text below so it can be reported:")
+            .setView(ScrollView(this).apply { addView(textView) })
+            .setPositiveButton("OK", null)
+            .show()
+    }
+
     private fun resumeOrPickModel() {
         // Prefer whichever model was explicitly marked active (set on every successful load,
         // including an explicit switch from the model manager, which doesn't necessarily touch
@@ -172,8 +191,20 @@ class CharacterGalleryActivity : AppCompatActivity() {
 
         if (existingModel != null) {
             lifecycleScope.launch(Dispatchers.IO) {
-                loadModelWithTicker(existingModel.name, existingModel.path)
-                withContext(Dispatchers.Main) { onModelReady(existingModel.name) }
+                try {
+                    loadModelWithTicker(existingModel.name, existingModel.path)
+                    withContext(Dispatchers.Main) { onModelReady(existingModel.name) }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to load ${existingModel.name}", e)
+                    // Clear the marker so a broken/deleted model doesn't crash-loop the app on
+                    // every future launch too - the user needs to be able to pick a different one.
+                    ModelStorage.clearActiveModel(this@CharacterGalleryActivity)
+                    val detail = "${e.javaClass.simpleName}: ${e.message}\n\n${e.stackTraceToString()}"
+                    withContext(Dispatchers.Main) {
+                        statusTv.text = "Choose a .gguf model to get started."
+                        showErrorDetailsDialog(detail, title = "Error loading model")
+                    }
+                }
             }
         } else {
             statusTv.text = "Choose a .gguf model to get started."
@@ -213,16 +244,32 @@ class CharacterGalleryActivity : AppCompatActivity() {
         statusTv.text = "Reading the model..."
 
         lifecycleScope.launch(Dispatchers.IO) {
-            Log.i(TAG, "Parsing GGUF metadata...")
-            contentResolver.openInputStream(uri)?.use {
-                GgufMetadataReader.create().readStructuredMetadata(it)
-            }?.let { metadata ->
-                val modelName = metadata.filename() + FILE_EXTENSION_GGUF
-                contentResolver.openInputStream(uri)?.use { input ->
-                    ensureModelFile(modelName, input)
-                }?.let { modelFile ->
-                    loadModelWithTicker(modelFile.name, modelFile.path)
-                    withContext(Dispatchers.Main) { onModelReady(modelFile.name) }
+            try {
+                Log.i(TAG, "Parsing GGUF metadata...")
+                val modelFile = contentResolver.openInputStream(uri)?.use {
+                    GgufMetadataReader.create().readStructuredMetadata(it)
+                }?.let { metadata ->
+                    val modelName = metadata.filename() + FILE_EXTENSION_GGUF
+                    contentResolver.openInputStream(uri)?.use { input -> ensureModelFile(modelName, input) }
+                }
+
+                if (modelFile == null) {
+                    withContext(Dispatchers.Main) {
+                        statusTv.text = "Couldn't read that file as a GGUF model."
+                        mainFab.isEnabled = true
+                    }
+                    return@launch
+                }
+
+                loadModelWithTicker(modelFile.name, modelFile.path)
+                withContext(Dispatchers.Main) { onModelReady(modelFile.name) }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to load the selected model", e)
+                val detail = "${e.javaClass.simpleName}: ${e.message}\n\n${e.stackTraceToString()}"
+                withContext(Dispatchers.Main) {
+                    statusTv.text = "Choose a .gguf model to get started."
+                    mainFab.isEnabled = true
+                    showErrorDetailsDialog(detail, title = "Error loading model")
                 }
             }
         }
