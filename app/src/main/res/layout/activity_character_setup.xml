@@ -40,6 +40,7 @@
             android:padding="28dp"
             android:scaleType="centerCrop"
             android:src="@drawable/ic_character_placeholder"
+            android:contentDescription="Tap to choose a photo"
             app:shapeAppearanceOverlay="@style/CircleImage" />
 
         <TextView

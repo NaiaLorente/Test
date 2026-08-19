@@ -184,7 +184,9 @@ class GroupChatActivity : AppCompatActivity() {
         members.forEach { character ->
             val chip = LayoutInflater.from(this).inflate(R.layout.item_speaker_chip, speakerRow, false)
             bindAvatarCircle(chip, character, R.id.chip_avatar_photo, R.id.chip_avatar_letter, R.id.chip_avatar_tile)
-            chip.findViewById<TextView>(R.id.chip_name).text = character.name.ifBlank { "Unnamed" }
+            val displayName = character.name.ifBlank { "Unnamed" }
+            chip.findViewById<TextView>(R.id.chip_name).text = displayName
+            chip.contentDescription = "Get a reply from $displayName"
             chip.setOnClickListener { if (isReady && !isGenerating) generateAsCharacter(character) }
             chip.isEnabled = false
             speakerRow.addView(chip)

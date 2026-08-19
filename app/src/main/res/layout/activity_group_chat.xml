@@ -153,6 +153,7 @@
             <com.google.android.material.floatingactionbutton.FloatingActionButton
                 android:id="@+id/group_fab"
                 android:enabled="false"
+                android:contentDescription="Send message"
                 style="@style/Widget.Material3.FloatingActionButton.Primary"
                 app:fabSize="mini"
                 android:layout_width="wrap_content"

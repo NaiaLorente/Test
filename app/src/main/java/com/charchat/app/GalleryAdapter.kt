@@ -75,6 +75,7 @@ class GalleryAdapter(
             holder.avatarTile.setBackgroundColor(holder.itemView.context.getColor(style.backgroundColorRes))
         }
 
+        holder.delete.contentDescription = "Delete ${character.name.ifBlank { "this character" }}"
         holder.itemView.setOnClickListener { onOpenCharacter(character) }
         holder.delete.setOnClickListener { onDeleteCharacter(character) }
     }
@@ -105,6 +106,7 @@ class GalleryAdapter(
             }
         }
 
+        holder.delete.contentDescription = "Delete ${group.displayName(members)}"
         holder.itemView.setOnClickListener { onOpenGroup(group) }
         holder.delete.setOnClickListener { onDeleteGroup(group) }
     }

@@ -1,4 +1,4 @@
-name: Build debug APK
+name: Build APKs
 
 on:
   push:
@@ -37,12 +37,25 @@ jobs:
           restore-keys: |
             gradle-${{ runner.os }}-
 
+      - name: Run unit tests
+        run: ./gradlew testDebugUnitTest --stacktrace
+
       - name: Build debug APK
         run: ./gradlew assembleDebug --stacktrace
 
-      - name: Upload APK
+      - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
           name: charchat-debug-apk
           path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Build release APK (verifies R8/minification)
+        run: ./gradlew assembleRelease --stacktrace
+
+      - name: Upload release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: charchat-release-apk
+          path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error

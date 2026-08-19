@@ -278,6 +278,7 @@ private class ModelAdapter(
         holder.size.text = ModelStorage.formatSize(file.length())
         holder.activeBadge.visibility = if (isActive) View.VISIBLE else View.GONE
         holder.delete.visibility = if (isActive) View.GONE else View.VISIBLE
+        holder.delete.contentDescription = "Delete ${file.name}"
         holder.delete.setOnClickListener { onDelete(file) }
         holder.itemView.setOnClickListener { if (!isActive) onSwitch(file) }
     }

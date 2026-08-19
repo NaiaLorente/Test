@@ -38,6 +38,7 @@
                 android:layout_height="64dp"
                 android:clickable="true"
                 android:focusable="true"
+                android:contentDescription="View character photo"
                 android:foreground="?attr/selectableItemBackgroundBorderless">
 
                 <com.google.android.material.imageview.ShapeableImageView
@@ -46,6 +47,7 @@
                     android:layout_height="match_parent"
                     android:scaleType="centerCrop"
                     android:visibility="gone"
+                    android:importantForAccessibility="no"
                     app:shapeAppearanceOverlay="@style/CircleImage" />
 
                 <TextView
@@ -155,6 +157,7 @@
             <com.google.android.material.floatingactionbutton.FloatingActionButton
                 android:id="@+id/fab"
                 android:enabled="false"
+                android:contentDescription="Send message"
                 style="@style/Widget.Material3.FloatingActionButton.Primary"
                 app:fabSize="mini"
                 android:layout_width="wrap_content"

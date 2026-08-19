@@ -41,6 +41,7 @@
                             android:layout_height="match_parent"
                             android:scaleType="centerCrop"
                             android:visibility="gone"
+                            android:importantForAccessibility="no"
                             app:shapeAppearanceOverlay="@style/CircleImage" />
 
                         <TextView
@@ -66,6 +67,7 @@
                             android:layout_height="match_parent"
                             android:scaleType="centerCrop"
                             android:visibility="gone"
+                            android:importantForAccessibility="no"
                             app:shapeAppearanceOverlay="@style/CircleImage" />
 
                         <TextView
@@ -91,6 +93,7 @@
                             android:layout_height="match_parent"
                             android:scaleType="centerCrop"
                             android:visibility="gone"
+                            android:importantForAccessibility="no"
                             app:shapeAppearanceOverlay="@style/CircleImage" />
 
                         <TextView
