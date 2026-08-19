@@ -157,7 +157,7 @@ class GroupChatActivity : AppCompatActivity() {
                 }
                 return@launch
             }
-            replayConversation()
+            replayConversation(useCachedHistory = true)
         }
     }
 
@@ -218,8 +218,12 @@ class GroupChatActivity : AppCompatActivity() {
      * context, the same way [ChatActivity.replayConversation] does for a solo chat - except every
      * character's past line is seeded behind a "[Name's turn]" director cue naming who said it,
      * so the shared history stays unambiguous about who is speaking.
+     *
+     * See [ChatActivity.replayConversation] for what [useCachedHistory] does: skips re-seeding the
+     * entire raw transcript on a cold start if an earlier replay saved a bounded snapshot, left
+     * false anywhere the [messages] list was just trimmed (regenerate/edit-last/clear/edit-group).
      */
-    private suspend fun replayConversation(tickerLabel: String = "Loading conversation") {
+    private suspend fun replayConversation(tickerLabel: String = "Loading conversation", useCachedHistory: Boolean = false) {
         val startMs = SystemClock.elapsedRealtime()
         val tickerJob = lifecycleScope.launch(Dispatchers.Main) {
             statusTv.visibility = View.VISIBLE
@@ -233,7 +237,19 @@ class GroupChatActivity : AppCompatActivity() {
             engine.setSystemPrompt(group.toSystemPrompt(members))
             engine.setTemperature(group.creativity)
 
-            for (message in messages) {
+            val snapshot = if (useCachedHistory) ConversationStore.loadCompactedGroupHistory(this, group.id) else null
+            val alreadyCoveredCount = if (snapshot != null && snapshot.second in 1..messages.size) {
+                for (entry in snapshot.first) {
+                    when (entry.role) {
+                        "user" -> engine.seedUserMessage(entry.content)
+                        "assistant" -> engine.seedAssistantMessage(entry.content)
+                        else -> engine.seedSystemNote(entry.content)
+                    }
+                }
+                snapshot.second
+            } else 0
+
+            for (message in messages.drop(alreadyCoveredCount)) {
                 if (message.content.isBlank()) continue
                 if (message.isUser) {
                     engine.seedUserMessage("User: ${message.content}")
@@ -243,6 +259,12 @@ class GroupChatActivity : AppCompatActivity() {
                     engine.seedAssistantMessage("$speakerName: ${message.content}")
                 }
             }
+
+            // Snapshot the model's now-current compacted memory so the *next* replay can resume
+            // from here instead of always re-seeding the entire transcript from scratch again.
+            runCatching {
+                ConversationStore.saveCompactedGroupHistory(this, group.id, engine.compactedHistory(), messages.size)
+            }.onFailure { Log.w(TAG, "Failed to snapshot compacted history", it) }
 
             withContext(Dispatchers.Main) {
                 statusTv.visibility = View.GONE

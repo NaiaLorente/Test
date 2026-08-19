@@ -39,6 +39,24 @@ interface InferenceEngine {
     suspend fun seedUserMessage(message: String)
 
     /**
+     * Injects a system-role note (e.g. a saved rolling-summary recap) into context/history
+     * without generating it - the mid-conversation counterpart to [setSystemPrompt], which only
+     * ever sets the pinned persona message. Used to replay a previously saved [compactedHistory]
+     * snapshot.
+     */
+    suspend fun seedSystemNote(note: String)
+
+    /**
+     * The model's current chat history after the pinned system message - any rolling-summary
+     * recap notes folded in by context shifting, plus the still-live raw turns - as a JSON array
+     * of {"role", "content"} objects, in order. Lets a caller snapshot a bounded picture of
+     * native memory (never larger than what actually still fits in context) so a later cold-start
+     * replay can resume from this instead of re-seeding the entire, ever-growing raw transcript
+     * from scratch every time. "[]" if no system prompt has been processed yet.
+     */
+    suspend fun compactedHistory(): String
+
+    /**
      * Adjusts the sampler's "creativity" (temperature). Safe to call any time a model is loaded;
      * takes effect on the next generated reply.
      */

@@ -112,6 +112,12 @@ internal class InferenceEngineImpl private constructor(
     private external fun seedUserMessageNative(message: String): Int
 
     @FastNative
+    private external fun seedSystemNoteNative(message: String): Int
+
+    @FastNative
+    private external fun getCompactedHistoryNative(): String
+
+    @FastNative
     private external fun setSamplerTemperatureNative(temp: Float): Int
 
     @FastNative
@@ -290,6 +296,34 @@ internal class InferenceEngineImpl private constructor(
             }
             Log.i(TAG, "User message seeded!")
             Unit
+        }
+
+    /**
+     * Injects a system-role note (e.g. a saved rolling-summary recap) into context/history.
+     */
+    override suspend fun seedSystemNote(note: String) =
+        withContext(llamaDispatcher) {
+            require(note.isNotBlank()) { "Cannot seed an empty system note!" }
+            check(_state.value is InferenceEngine.State.ModelReady) {
+                "Cannot seed system note in ${_state.value.javaClass.simpleName}!"
+            }
+
+            Log.i(TAG, "Seeding system note...")
+            seedSystemNoteNative(note).let { result ->
+                if (result != 0) {
+                    RuntimeException(describeNativeError("Failed to seed system note", result)).also {
+                        _state.value = InferenceEngine.State.Error(it)
+                        throw it
+                    }
+                }
+            }
+            Log.i(TAG, "System note seeded!")
+            Unit
+        }
+
+    override suspend fun compactedHistory(): String =
+        withContext(llamaDispatcher) {
+            runCatching { getCompactedHistoryNative() }.getOrDefault("[]")
         }
 
     /**

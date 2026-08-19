@@ -146,7 +146,7 @@ class ChatActivity : AppCompatActivity() {
                 }
                 return@launch
             }
-            replayConversation()
+            replayConversation(useCachedHistory = true)
         }
     }
 
@@ -188,8 +188,16 @@ class ChatActivity : AppCompatActivity() {
      * Rebuilds the model's actual memory by replaying the persisted transcript, instead of just
      * restoring the UI list. A brand-new character (no messages yet) gets its greeting seeded and
      * saved as the first message, so from then on this is the only path that ever runs.
+     *
+     * [useCachedHistory] lets a cold app start skip re-seeding the entire, ever-growing raw
+     * transcript from scratch: if a [ConversationStore.loadCompactedHistory] snapshot was saved by
+     * an earlier replay, only that (bounded by the context window) plus whatever messages came
+     * after it need to be seeded. Left false for regenerate/edit-last/clear, which already work
+     * against a just-trimmed [messages] list that a stale snapshot could otherwise mismatch.
+     * Either way, a fresh snapshot of the model's now-current memory is saved at the end, so the
+     * *next* replay - cold start or not - can benefit from it.
      */
-    private suspend fun replayConversation(tickerLabel: String = "Loading conversation") {
+    private suspend fun replayConversation(tickerLabel: String = "Loading conversation", useCachedHistory: Boolean = false) {
         // A live elapsed-time readout, same reasoning as the generation ticker in
         // handleUserInput(): setting up a fresh character (system prompt + greeting) is its own
         // separate step that can take a while on a slow/misbehaving model, and this makes a long
@@ -216,14 +224,33 @@ class ChatActivity : AppCompatActivity() {
                 }
                 persist()
             } else {
+                val snapshot = if (useCachedHistory) ConversationStore.loadCompactedHistory(this, character.id) else null
+                val alreadyCoveredCount = if (snapshot != null && snapshot.second in 1..messages.size) {
+                    for (entry in snapshot.first) {
+                        when (entry.role) {
+                            "user" -> engine.seedUserMessage(entry.content)
+                            "assistant" -> engine.seedAssistantMessage(entry.content)
+                            else -> engine.seedSystemNote(entry.content)
+                        }
+                    }
+                    snapshot.second
+                } else 0
+
                 // Blank entries can't happen going forward (persist() filters them out), but
                 // skip them defensively anyway so an already-saved conversation from before that
                 // fix isn't stuck forever: seedUserMessage/seedAssistantMessage reject blank text.
-                for (message in messages) {
+                for (message in messages.drop(alreadyCoveredCount)) {
                     if (message.content.isBlank()) continue
                     if (message.isUser) engine.seedUserMessage(message.content) else engine.seedAssistantMessage(message.content)
                 }
             }
+
+            // Snapshot the model's now-current compacted memory (rolling-summary notes plus
+            // whatever raw turns are still live) so the *next* replay can resume from here instead
+            // of always re-seeding the entire transcript from scratch again.
+            runCatching {
+                ConversationStore.saveCompactedHistory(this, character.id, engine.compactedHistory(), messages.size)
+            }.onFailure { Log.w(TAG, "Failed to snapshot compacted history", it) }
 
             withContext(Dispatchers.Main) {
                 statusTv.visibility = View.GONE

@@ -27,6 +27,31 @@ static std::string join(const std::vector<T> &values, const std::string &delim) 
     return str.str();
 }
 
+/** Minimal JSON string-body escaping (quotes, backslashes, control chars) - raw UTF-8 bytes pass through unchanged. */
+static std::string json_escape(const std::string &s) {
+    std::ostringstream out;
+    for (const unsigned char c: s) {
+        switch (c) {
+            case '"':  out << "\\\""; break;
+            case '\\': out << "\\\\"; break;
+            case '\b': out << "\\b"; break;
+            case '\f': out << "\\f"; break;
+            case '\n': out << "\\n"; break;
+            case '\r': out << "\\r"; break;
+            case '\t': out << "\\t"; break;
+            default:
+                if (c < 0x20) {
+                    char buf[8];
+                    snprintf(buf, sizeof(buf), "\\u%04x", c);
+                    out << buf;
+                } else {
+                    out << c;
+                }
+        }
+    }
+    return out.str();
+}
+
 /**
  * LLama resources: context, model, batch and sampler
  */
@@ -780,6 +805,28 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_getLastReplyStatsNative(JNIEnv 
     return env->NewStringUTF(g_last_reply_stats.c_str());
 }
 
+/**
+ * The model's current chat history after the pinned system message (chat_msgs[0]) - any
+ * rolling-summary recap notes folded in by context shifting, plus the still-live raw turns - as
+ * a JSON array of {"role", "content"} objects, in order. Lets the Kotlin side snapshot a bounded
+ * picture of native memory (never larger than what actually still fits in context) so a later
+ * cold-start replay can resume from this instead of always re-seeding the entire, ever-growing
+ * raw transcript from scratch. "[]" if no system prompt has been processed yet.
+ */
+extern "C"
+JNIEXPORT jstring JNICALL
+Java_com_arm_aichat_internal_InferenceEngineImpl_getCompactedHistoryNative(JNIEnv *env, jobject /*unused*/) {
+    std::ostringstream out;
+    out << "[";
+    for (size_t i = 1; i < chat_msgs.size(); i++) {
+        if (i > 1) out << ",";
+        out << "{\"role\":\"" << json_escape(chat_msgs[i].role) << "\","
+            << "\"content\":\"" << json_escape(chat_msgs[i].content) << "\"}";
+    }
+    out << "]";
+    return env->NewStringUTF(out.str().c_str());
+}
+
 static int decode_tokens_in_batches(
         llama_context *context,
         llama_batch &batch,
@@ -955,7 +1002,9 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_processUserPrompt(
  * conversation after the app restarts, so the model's actual memory is rebuilt, not just the UI.
  */
 static int seed_message(const std::string &role, const std::string &text) try {
-    g_last_operation = (role == ROLE_USER) ? "seed_message(user)" : "seed_message(assistant)";
+    g_last_operation = (role == ROLE_USER) ? "seed_message(user)"
+                        : (role == ROLE_ASSISTANT) ? "seed_message(assistant)"
+                        : "seed_message(system)";
     reset_short_term_states();
 
     std::string formatted_text = text;
@@ -1017,6 +1066,25 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_seedUserMessageNative(
     const std::string content(text);
     env->ReleaseStringUTFChars(jtext, text);
     return seed_message(ROLE_USER, content);
+}
+
+/**
+ * Injects a system-role note (e.g. a saved rolling-summary recap from [getCompactedHistoryNative])
+ * into context/history without generating it - the mid-conversation counterpart to
+ * processSystemPrompt(), which only ever sets the pinned persona message at chat_msgs[0].
+ */
+extern "C"
+JNIEXPORT jint JNICALL
+Java_com_arm_aichat_internal_InferenceEngineImpl_seedSystemNoteNative(
+        JNIEnv *env,
+        jobject /*unused*/,
+        jstring jtext
+) {
+    const auto *const text = env->GetStringUTFChars(jtext, nullptr);
+    LOGd("%s: Seeding system note: \n%s", __func__, text);
+    const std::string content(text);
+    env->ReleaseStringUTFChars(jtext, text);
+    return seed_message(ROLE_SYSTEM, content);
 }
 
 static bool is_valid_utf8(const char *string) {
