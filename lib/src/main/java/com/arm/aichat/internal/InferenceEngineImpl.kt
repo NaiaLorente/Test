@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.arm.aichat.InferenceEngine
 import com.arm.aichat.NATIVE_CRASH_LOG_FILE_NAME
+import com.arm.aichat.RestoredHistoryEntry
 import com.arm.aichat.UnsupportedArchitectureException
 import com.arm.aichat.isModelLoaded
 import com.arm.aichat.internal.InferenceEngineImpl.Companion.getInstance
@@ -116,6 +117,21 @@ internal class InferenceEngineImpl private constructor(
 
     @FastNative
     private external fun getCompactedHistoryNative(): String
+
+    @FastNative
+    private external fun getSystemPromptPositionNative(): Int
+
+    @FastNative
+    private external fun saveContextStateNative(path: String): Int
+
+    @FastNative
+    private external fun loadContextStateNative(path: String): Int
+
+    @FastNative
+    private external fun beginContextRestoreNative(systemPrompt: String, systemPromptPosition: Int): Int
+
+    @FastNative
+    private external fun appendRestoredEntryNative(role: String, content: String, endPosition: Int): Int
 
     @FastNative
     private external fun setSamplerTemperatureNative(temp: Float): Int
@@ -325,6 +341,59 @@ internal class InferenceEngineImpl private constructor(
         withContext(llamaDispatcher) {
             runCatching { getCompactedHistoryNative() }.getOrDefault("[]")
         }
+
+    override suspend fun systemPromptPosition(): Int =
+        withContext(llamaDispatcher) {
+            runCatching { getSystemPromptPositionNative() }.getOrDefault(0)
+        }
+
+    override suspend fun saveContextState(path: String) =
+        withContext(llamaDispatcher) {
+            check(_state.value is InferenceEngine.State.ModelReady) {
+                "Cannot save context state in ${_state.value.javaClass.simpleName}!"
+            }
+            saveContextStateNative(path).let { result ->
+                if (result != 0) {
+                    throw RuntimeException(describeNativeError("Failed to save context state", result))
+                }
+            }
+            Unit
+        }
+
+    override suspend fun loadContextState(path: String): Boolean =
+        withContext(llamaDispatcher) {
+            check(_state.value is InferenceEngine.State.ModelReady) {
+                "Cannot load context state in ${_state.value.javaClass.simpleName}!"
+            }
+            runCatching { loadContextStateNative(path) == 0 }.getOrDefault(false)
+        }
+
+    // Deliberately doesn't touch _state.value on failure here (unlike setSystemPrompt/seedUserMessage
+    // etc, which move to State.Error) - a failed restore should leave state exactly as it was
+    // (ModelReady) so the caller's fallback setSystemPrompt() call, which fully resets both the
+    // KV-cache and bookkeeping regardless of how far this got, is free to run right after.
+    override suspend fun restoreContext(
+        systemPrompt: String,
+        systemPromptPosition: Int,
+        entries: List<RestoredHistoryEntry>
+    ) = withContext(llamaDispatcher) {
+        check(_state.value is InferenceEngine.State.ModelReady) {
+            "Cannot restore context in ${_state.value.javaClass.simpleName}!"
+        }
+        beginContextRestoreNative(systemPrompt, systemPromptPosition).let { result ->
+            if (result != 0) {
+                throw RuntimeException(describeNativeError("Failed to begin context restore", result))
+            }
+        }
+        for (entry in entries) {
+            appendRestoredEntryNative(entry.role, entry.content, entry.endPosition).let { result ->
+                if (result != 0) {
+                    throw RuntimeException(describeNativeError("Failed to restore history entry", result))
+                }
+            }
+        }
+        Unit
+    }
 
     /**
      * Adjusts the sampler's creativity (temperature) on the fly.

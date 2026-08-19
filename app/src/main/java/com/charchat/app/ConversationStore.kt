@@ -5,8 +5,29 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
-/** One entry of the model's native chat history after the pinned system message: role + exact text. */
-data class HistoryEntry(val role: String, val content: String)
+/**
+ * One entry of the model's native chat history after the pinned system message: role, exact
+ * text, and its real KV-cache boundary position - only meaningful (not -1) when this snapshot was
+ * captured alongside a raw [contextStateFile], to rebuild bookkeeping after restoring it.
+ */
+data class HistoryEntry(val role: String, val content: String, val endPosition: Int = -1)
+
+/**
+ * Everything needed to validate and use a saved raw context state ([contextStateFile]): which
+ * model it was saved against, a hash of the system prompt that was live at save time (so an
+ * edited character/group, or a changed member list, correctly invalidates it), the pinned system
+ * message's own end position, the compacted history entries (with real KV-cache positions) to
+ * rebuild bookkeeping after restoring the raw state, and how many of the full persisted message
+ * list this snapshot covers (a stale save from before the most recent messages just means the gap
+ * is seeded the normal way on top of it).
+ */
+data class ContextStateMetadata(
+    val modelName: String,
+    val systemPromptHash: String,
+    val systemPromptPosition: Int,
+    val entries: List<HistoryEntry>,
+    val coveredMessageCount: Int
+)
 
 /**
  * Persists characters, groups, and their conversations to disk - one JSON file per character or
@@ -16,39 +37,64 @@ data class HistoryEntry(val role: String, val content: String)
 object ConversationStore {
     private const val CHARACTERS_DIRECTORY = "characters"
     private const val GROUPS_DIRECTORY = "groups"
+    private const val CONTEXT_STATE_DIRECTORY = "context_state"
 
     private fun directory(context: Context, name: String) =
         File(context.filesDir, name).also { if (!it.exists()) it.mkdirs() }
 
     private fun charactersDirectory(context: Context) = directory(context, CHARACTERS_DIRECTORY)
     private fun groupsDirectory(context: Context) = directory(context, GROUPS_DIRECTORY)
+    private fun contextStateDirectory(context: Context) = directory(context, CONTEXT_STATE_DIRECTORY)
 
     private fun fileFor(context: Context, id: String) = File(charactersDirectory(context), "$id.json")
     private fun groupFileFor(context: Context, id: String) = File(groupsDirectory(context), "$id.json")
 
+    /** Where the engine's raw context state (KV-cache) gets saved to and restored from. */
+    fun contextStateFile(context: Context, characterId: String): File =
+        File(contextStateDirectory(context), "character-$characterId.state")
+
+    fun groupContextStateFile(context: Context, groupId: String): File =
+        File(contextStateDirectory(context), "group-$groupId.state")
+
     private const val COMPACTED_HISTORY_KEY = "compactedHistory"
     private const val COMPACTED_HISTORY_COUNT_KEY = "compactedHistoryCount"
+    private const val CONTEXT_STATE_MODEL_KEY = "contextStateModelName"
+    private const val CONTEXT_STATE_PROMPT_HASH_KEY = "contextStateSystemPromptHash"
+    private const val CONTEXT_STATE_PROMPT_POSITION_KEY = "contextStateSystemPromptPosition"
+    // Deliberately separate from COMPACTED_HISTORY_KEY/COUNT (a different, older snapshot that
+    // replayConversation() re-saves after *every* replay, including ones that used a fast restore)
+    // - these must only ever change in lockstep with the raw .state file itself, or a restore could
+    // apply entries/coverage the .state file's actual KV-cache doesn't yet contain (e.g. if the app
+    // is killed by a crash between one onStop() save and the next, after more messages were sent).
+    private const val CONTEXT_STATE_HISTORY_KEY = "contextStateHistory"
+    private const val CONTEXT_STATE_HISTORY_COUNT_KEY = "contextStateHistoryCount"
 
     private fun readJsonFile(file: File): JSONObject? =
         if (file.exists()) runCatching { JSONObject(file.readText()) }.getOrNull() else null
 
     /**
      * A plain [save]/[saveGroup] only knows about the character/group fields and the raw message
-     * list - carry forward whatever compacted-history snapshot [saveCompactedHistory] previously
-     * wrote for this file, so an ordinary message-list persist doesn't silently erase it.
+     * list - carry forward whatever compacted-history/context-state metadata [saveCompactedHistory]
+     * or [saveContextStateMetadata] previously wrote for this file, so an ordinary message-list
+     * persist doesn't silently erase it.
      */
     private fun carryForwardCompactedHistory(target: JSONObject, existing: JSONObject?) {
         existing ?: return
-        existing.optJSONArray(COMPACTED_HISTORY_KEY)?.let { target.put(COMPACTED_HISTORY_KEY, it) }
-        if (existing.has(COMPACTED_HISTORY_COUNT_KEY)) {
-            target.put(COMPACTED_HISTORY_COUNT_KEY, existing.optInt(COMPACTED_HISTORY_COUNT_KEY))
+        for (key in listOf(COMPACTED_HISTORY_KEY, CONTEXT_STATE_HISTORY_KEY)) {
+            existing.optJSONArray(key)?.let { target.put(key, it) }
+        }
+        for (key in listOf(COMPACTED_HISTORY_COUNT_KEY, CONTEXT_STATE_PROMPT_POSITION_KEY, CONTEXT_STATE_HISTORY_COUNT_KEY)) {
+            if (existing.has(key)) target.put(key, existing.optInt(key))
+        }
+        for (key in listOf(CONTEXT_STATE_MODEL_KEY, CONTEXT_STATE_PROMPT_HASH_KEY)) {
+            if (existing.has(key)) target.put(key, existing.optString(key))
         }
     }
 
     private fun parseHistoryEntries(array: JSONArray): List<HistoryEntry> =
         (0 until array.length()).map { i ->
             val obj = array.getJSONObject(i)
-            HistoryEntry(obj.optString("role"), obj.optString("content"))
+            HistoryEntry(obj.optString("role"), obj.optString("content"), obj.optInt("endPosition", -1))
         }
 
     /**
@@ -64,6 +110,67 @@ object ConversationStore {
         if (count <= 0) return null
         return runCatching { parseHistoryEntries(array) to count }.getOrNull()
     }
+
+    /** See [ContextStateMetadata]. Null if no raw context state was ever saved for this file. */
+    private fun loadContextStateMetadata(file: File): ContextStateMetadata? {
+        val json = readJsonFile(file) ?: return null
+        val modelName = json.optString(CONTEXT_STATE_MODEL_KEY, "").takeIf { it.isNotBlank() } ?: return null
+        val hash = json.optString(CONTEXT_STATE_PROMPT_HASH_KEY, "").takeIf { it.isNotBlank() } ?: return null
+        val position = json.optInt(CONTEXT_STATE_PROMPT_POSITION_KEY, -1)
+        val count = json.optInt(CONTEXT_STATE_HISTORY_COUNT_KEY, -1)
+        if (position <= 0 || count <= 0) return null
+        val array = json.optJSONArray(CONTEXT_STATE_HISTORY_KEY) ?: return null
+        return runCatching { ContextStateMetadata(modelName, hash, position, parseHistoryEntries(array), count) }.getOrNull()
+    }
+
+    private fun saveContextStateMetadata(
+        file: File,
+        modelName: String,
+        systemPromptHash: String,
+        systemPromptPosition: Int,
+        historyJson: String,
+        coveredMessageCount: Int
+    ) {
+        val json = readJsonFile(file) ?: return // character/group must already exist on disk
+        runCatching {
+            json.put(CONTEXT_STATE_MODEL_KEY, modelName)
+            json.put(CONTEXT_STATE_PROMPT_HASH_KEY, systemPromptHash)
+            json.put(CONTEXT_STATE_PROMPT_POSITION_KEY, systemPromptPosition)
+            json.put(CONTEXT_STATE_HISTORY_KEY, JSONArray(historyJson))
+            json.put(CONTEXT_STATE_HISTORY_COUNT_KEY, coveredMessageCount)
+            file.writeText(json.toString())
+        }
+    }
+
+    fun loadContextStateMetadata(context: Context, characterId: String) =
+        loadContextStateMetadata(fileFor(context, characterId))
+
+    fun saveContextStateMetadata(
+        context: Context,
+        characterId: String,
+        modelName: String,
+        systemPromptHash: String,
+        systemPromptPosition: Int,
+        historyJson: String,
+        coveredMessageCount: Int
+    ) = saveContextStateMetadata(
+        fileFor(context, characterId), modelName, systemPromptHash, systemPromptPosition, historyJson, coveredMessageCount
+    )
+
+    fun loadGroupContextStateMetadata(context: Context, groupId: String) =
+        loadContextStateMetadata(groupFileFor(context, groupId))
+
+    fun saveGroupContextStateMetadata(
+        context: Context,
+        groupId: String,
+        modelName: String,
+        systemPromptHash: String,
+        systemPromptPosition: Int,
+        historyJson: String,
+        coveredMessageCount: Int
+    ) = saveContextStateMetadata(
+        groupFileFor(context, groupId), modelName, systemPromptHash, systemPromptPosition, historyJson, coveredMessageCount
+    )
 
     private fun saveCompactedHistory(file: File, historyJson: String, coveredCount: Int) {
         val json = readJsonFile(file) ?: return // character/group must already exist on disk
@@ -144,6 +251,7 @@ object ConversationStore {
 
     fun delete(context: Context, id: String) {
         fileFor(context, id).delete()
+        contextStateFile(context, id).delete()
     }
 
     /** Every group this character is currently a member of, so deleting them can warn about it. */
@@ -170,5 +278,6 @@ object ConversationStore {
 
     fun deleteGroup(context: Context, id: String) {
         groupFileFor(context, id).delete()
+        groupContextStateFile(context, id).delete()
     }
 }

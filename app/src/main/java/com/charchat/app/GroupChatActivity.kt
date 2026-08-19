@@ -161,6 +161,74 @@ class GroupChatActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Saves the model's actual in-memory state (KV-cache) to disk whenever this screen stops
+     * being visible - backgrounded, or left entirely - so the *next* time it's opened, cold-start
+     * replay can restore it directly instead of reprocessing the whole system prompt and
+     * conversation from scratch (see attemptFastContextRestore() in replayConversation()). Chosen
+     * deliberately over saving after every message: a save is a real disk write proportional to
+     * how much context is in use, so doing it only here avoids adding that cost to every single
+     * exchange while still keeping the save reasonably fresh.
+     */
+    override fun onStop() {
+        super.onStop()
+        if (::group.isInitialized && ::engine.isInitialized && isReady) {
+            val coveredMessageCount = messages.size
+            lifecycleScope.launch(Dispatchers.Default) {
+                runCatching { saveContextStateSnapshot(coveredMessageCount) }
+                    .onFailure { Log.w(TAG, "Failed to save context state", it) }
+            }
+        }
+    }
+
+    private suspend fun saveContextStateSnapshot(coveredMessageCount: Int) {
+        val modelName = ModelStorage.activeModelName(this) ?: return
+        engine.saveContextState(ConversationStore.groupContextStateFile(this, group.id).path)
+        ConversationStore.saveGroupContextStateMetadata(
+            context = this,
+            groupId = group.id,
+            modelName = modelName,
+            systemPromptHash = group.toSystemPrompt(members).hashCode().toString(),
+            systemPromptPosition = engine.systemPromptPosition(),
+            historyJson = engine.compactedHistory(),
+            coveredMessageCount = coveredMessageCount
+        )
+    }
+
+    /**
+     * Tries to restore the model's actual memory from a previously saved raw context state
+     * ([saveContextStateSnapshot]) instead of reprocessing the system prompt and conversation from
+     * scratch - the fix for a cold start on a large system prompt/long conversation taking minutes.
+     * Returns false (never throws) for any reason it can't: no state was ever saved, it doesn't
+     * match the currently active model, the group's scenario or member list changed since
+     * (different system prompt hash), or the file is missing/corrupt - so the caller can fall back
+     * to a normal replay exactly as if this function didn't exist.
+     */
+    private suspend fun attemptFastContextRestore(): Boolean = runCatching {
+        val metadata = ConversationStore.loadGroupContextStateMetadata(this, group.id) ?: return@runCatching false
+        if (metadata.coveredMessageCount !in 1..messages.size) return@runCatching false
+        if (metadata.modelName != ModelStorage.activeModelName(this)) return@runCatching false
+        val systemPrompt = group.toSystemPrompt(members)
+        if (metadata.systemPromptHash != systemPrompt.hashCode().toString()) return@runCatching false
+
+        val stateFile = ConversationStore.groupContextStateFile(this, group.id)
+        if (!engine.loadContextState(stateFile.path)) return@runCatching false
+
+        engine.restoreContext(systemPrompt, metadata.systemPromptPosition, metadata.entries)
+        engine.setTemperature(group.creativity)
+        for (message in messages.drop(metadata.coveredMessageCount)) {
+            if (message.content.isBlank()) continue
+            if (message.isUser) {
+                engine.seedUserMessage("User: ${message.content}")
+            } else {
+                val speakerName = membersById[message.speakerId]?.name?.ifBlank { "Unnamed" } ?: continue
+                engine.seedUserMessage("[$speakerName's turn]")
+                engine.seedAssistantMessage("$speakerName: ${message.content}")
+            }
+        }
+        true
+    }.getOrDefault(false)
+
     private fun dpToPx(dp: Int): Int =
         TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, dp.toFloat(), resources.displayMetrics).toInt()
 
@@ -235,29 +303,31 @@ class GroupChatActivity : AppCompatActivity() {
             }
         }
         try {
-            engine.setSystemPrompt(group.toSystemPrompt(members))
-            engine.setTemperature(group.creativity)
+            if (!attemptFastContextRestore()) {
+                engine.setSystemPrompt(group.toSystemPrompt(members))
+                engine.setTemperature(group.creativity)
 
-            val snapshot = if (useCachedHistory) ConversationStore.loadCompactedGroupHistory(this, group.id) else null
-            val alreadyCoveredCount = if (snapshot != null && snapshot.second in 1..messages.size) {
-                for (entry in snapshot.first) {
-                    when (entry.role) {
-                        "user" -> engine.seedUserMessage(entry.content)
-                        "assistant" -> engine.seedAssistantMessage(entry.content)
-                        else -> engine.seedSystemNote(entry.content)
+                val snapshot = if (useCachedHistory) ConversationStore.loadCompactedGroupHistory(this, group.id) else null
+                val alreadyCoveredCount = if (snapshot != null && snapshot.second in 1..messages.size) {
+                    for (entry in snapshot.first) {
+                        when (entry.role) {
+                            "user" -> engine.seedUserMessage(entry.content)
+                            "assistant" -> engine.seedAssistantMessage(entry.content)
+                            else -> engine.seedSystemNote(entry.content)
+                        }
                     }
-                }
-                snapshot.second
-            } else 0
+                    snapshot.second
+                } else 0
 
-            for (message in messages.drop(alreadyCoveredCount)) {
-                if (message.content.isBlank()) continue
-                if (message.isUser) {
-                    engine.seedUserMessage("User: ${message.content}")
-                } else {
-                    val speakerName = membersById[message.speakerId]?.name?.ifBlank { "Unnamed" } ?: continue
-                    engine.seedUserMessage("[$speakerName's turn]")
-                    engine.seedAssistantMessage("$speakerName: ${message.content}")
+                for (message in messages.drop(alreadyCoveredCount)) {
+                    if (message.content.isBlank()) continue
+                    if (message.isUser) {
+                        engine.seedUserMessage("User: ${message.content}")
+                    } else {
+                        val speakerName = membersById[message.speakerId]?.name?.ifBlank { "Unnamed" } ?: continue
+                        engine.seedUserMessage("[$speakerName's turn]")
+                        engine.seedAssistantMessage("$speakerName: ${message.content}")
+                    }
                 }
             }
 

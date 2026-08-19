@@ -150,6 +150,68 @@ class ChatActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Saves the model's actual in-memory state (KV-cache) to disk whenever this screen stops
+     * being visible - backgrounded, or left entirely - so the *next* time it's opened, cold-start
+     * replay can restore it directly instead of reprocessing the whole system prompt and
+     * conversation from scratch (see attemptFastContextRestore() in replayConversation()). Chosen
+     * deliberately over saving after every message: a save is a real disk write proportional to
+     * how much context is in use, so doing it only here avoids adding that cost to every single
+     * exchange while still keeping the save reasonably fresh.
+     */
+    override fun onStop() {
+        super.onStop()
+        if (::character.isInitialized && ::engine.isInitialized && isReady) {
+            val coveredMessageCount = messages.size
+            lifecycleScope.launch(Dispatchers.Default) {
+                runCatching { saveContextStateSnapshot(coveredMessageCount) }
+                    .onFailure { Log.w(TAG, "Failed to save context state", it) }
+            }
+        }
+    }
+
+    private suspend fun saveContextStateSnapshot(coveredMessageCount: Int) {
+        val modelName = ModelStorage.activeModelName(this) ?: return
+        engine.saveContextState(ConversationStore.contextStateFile(this, character.id).path)
+        ConversationStore.saveContextStateMetadata(
+            context = this,
+            characterId = character.id,
+            modelName = modelName,
+            systemPromptHash = character.toSystemPrompt().hashCode().toString(),
+            systemPromptPosition = engine.systemPromptPosition(),
+            historyJson = engine.compactedHistory(),
+            coveredMessageCount = coveredMessageCount
+        )
+    }
+
+    /**
+     * Tries to restore the model's actual memory from a previously saved raw context state
+     * ([saveContextStateSnapshot]) instead of reprocessing the system prompt and conversation from
+     * scratch - the fix for a cold start on a large system prompt/long conversation taking minutes.
+     * Returns false (never throws) for any reason it can't: no state was ever saved, it doesn't
+     * match the currently active model, the character was edited since (different system prompt
+     * hash), or the file is missing/corrupt - so the caller can fall back to a normal replay
+     * exactly as if this function didn't exist.
+     */
+    private suspend fun attemptFastContextRestore(): Boolean = runCatching {
+        val metadata = ConversationStore.loadContextStateMetadata(this, character.id) ?: return@runCatching false
+        if (metadata.coveredMessageCount !in 1..messages.size) return@runCatching false
+        if (metadata.modelName != ModelStorage.activeModelName(this)) return@runCatching false
+        val systemPrompt = character.toSystemPrompt()
+        if (metadata.systemPromptHash != systemPrompt.hashCode().toString()) return@runCatching false
+
+        val stateFile = ConversationStore.contextStateFile(this, character.id)
+        if (!engine.loadContextState(stateFile.path)) return@runCatching false
+
+        engine.restoreContext(systemPrompt, metadata.systemPromptPosition, metadata.entries)
+        engine.setTemperature(character.creativity)
+        for (message in messages.drop(metadata.coveredMessageCount)) {
+            if (message.content.isBlank()) continue
+            if (message.isUser) engine.seedUserMessage(message.content) else engine.seedAssistantMessage(message.content)
+        }
+        true
+    }.getOrDefault(false)
+
     private fun applyHeader() {
         headerName.text = character.name.ifBlank { "Unnamed" }
         val bitmap = character.avatarPath?.let { path -> runCatching { BitmapFactory.decodeFile(path) }.getOrNull() }
@@ -214,35 +276,37 @@ class ChatActivity : AppCompatActivity() {
             }
         }
         try {
-            engine.setSystemPrompt(character.toSystemPrompt())
-            engine.setTemperature(character.creativity)
+            if (!attemptFastContextRestore()) {
+                engine.setSystemPrompt(character.toSystemPrompt())
+                engine.setTemperature(character.creativity)
 
-            if (messages.isEmpty() && character.greeting.isNotBlank()) {
-                engine.seedAssistantMessage(character.greeting)
-                withContext(Dispatchers.Main) {
-                    messages.add(Message(UUID.randomUUID().toString(), character.greeting, false))
-                    messageAdapter.notifyItemInserted(messages.size - 1)
-                }
-                persist()
-            } else {
-                val snapshot = if (useCachedHistory) ConversationStore.loadCompactedHistory(this, character.id) else null
-                val alreadyCoveredCount = if (snapshot != null && snapshot.second in 1..messages.size) {
-                    for (entry in snapshot.first) {
-                        when (entry.role) {
-                            "user" -> engine.seedUserMessage(entry.content)
-                            "assistant" -> engine.seedAssistantMessage(entry.content)
-                            else -> engine.seedSystemNote(entry.content)
-                        }
+                if (messages.isEmpty() && character.greeting.isNotBlank()) {
+                    engine.seedAssistantMessage(character.greeting)
+                    withContext(Dispatchers.Main) {
+                        messages.add(Message(UUID.randomUUID().toString(), character.greeting, false))
+                        messageAdapter.notifyItemInserted(messages.size - 1)
                     }
-                    snapshot.second
-                } else 0
+                    persist()
+                } else {
+                    val snapshot = if (useCachedHistory) ConversationStore.loadCompactedHistory(this, character.id) else null
+                    val alreadyCoveredCount = if (snapshot != null && snapshot.second in 1..messages.size) {
+                        for (entry in snapshot.first) {
+                            when (entry.role) {
+                                "user" -> engine.seedUserMessage(entry.content)
+                                "assistant" -> engine.seedAssistantMessage(entry.content)
+                                else -> engine.seedSystemNote(entry.content)
+                            }
+                        }
+                        snapshot.second
+                    } else 0
 
-                // Blank entries can't happen going forward (persist() filters them out), but
-                // skip them defensively anyway so an already-saved conversation from before that
-                // fix isn't stuck forever: seedUserMessage/seedAssistantMessage reject blank text.
-                for (message in messages.drop(alreadyCoveredCount)) {
-                    if (message.content.isBlank()) continue
-                    if (message.isUser) engine.seedUserMessage(message.content) else engine.seedAssistantMessage(message.content)
+                    // Blank entries can't happen going forward (persist() filters them out), but
+                    // skip them defensively anyway so an already-saved conversation from before
+                    // that fix isn't stuck forever: seed*Message reject blank text.
+                    for (message in messages.drop(alreadyCoveredCount)) {
+                        if (message.content.isBlank()) continue
+                        if (message.isUser) engine.seedUserMessage(message.content) else engine.seedAssistantMessage(message.content)
+                    }
                 }
             }
 

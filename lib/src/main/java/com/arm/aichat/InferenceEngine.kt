@@ -57,6 +57,43 @@ interface InferenceEngine {
     suspend fun compactedHistory(): String
 
     /**
+     * The pinned system/persona message's own end position - where the raw conversation history
+     * begins. Needed alongside a [compactedHistory] snapshot to later resume bookkeeping after a
+     * [loadContextState] restore. 0 if no system prompt has been processed yet.
+     */
+    suspend fun systemPromptPosition(): Int
+
+    /**
+     * Persists the context's raw internal state (KV-cache contents, sampler state) to [path], so
+     * a later [loadContextState] can restore it directly instead of reprocessing the system
+     * prompt and conversation from scratch - the actual fix for a cold start on a large system
+     * prompt/long conversation taking a very long time. A save is a real disk write proportional
+     * to how much context is in use, so callers should pick a deliberate cadence (e.g. only when
+     * leaving a chat) rather than after every message.
+     */
+    suspend fun saveContextState(path: String)
+
+    /**
+     * Restores the context's raw internal state previously saved by [saveContextState]. Returns
+     * false, rather than throwing, if there's simply nothing valid to restore - no state was ever
+     * saved, the file is missing/corrupt, or it doesn't match the currently loaded model - since
+     * that's an expected, non-exceptional outcome callers should just fall back to a normal replay
+     * for, not treat as a failure. Only restores the raw state itself; [restoreContext] still needs
+     * to run afterwards to rebuild the higher-level bookkeeping the rest of the engine relies on.
+     */
+    suspend fun loadContextState(path: String): Boolean
+
+    /**
+     * Rebuilds bookkeeping (chat_msgs, positions) to match a context whose raw state was just
+     * restored via a successful [loadContextState] - the saved state blob itself carries no
+     * notion of "messages", only raw cache contents. Must be called right after, before any other
+     * engine operation, with the exact [systemPrompt]/[systemPromptPosition] and [entries] that
+     * were live at save time (from [compactedHistory]/[systemPromptPosition]) - never a freshly
+     * rebuilt system prompt, which would no longer match what's actually in the restored cache.
+     */
+    suspend fun restoreContext(systemPrompt: String, systemPromptPosition: Int, entries: List<RestoredHistoryEntry>)
+
+    /**
      * Adjusts the sampler's "creativity" (temperature). Safe to call any time a model is loaded;
      * takes effect on the next generated reply.
      */
@@ -142,3 +179,6 @@ val State.isModelLoaded: Boolean
         this is State.Generating
 
 class UnsupportedArchitectureException : Exception()
+
+/** One [InferenceEngine.compactedHistory] entry, as needed to rebuild bookkeeping via [InferenceEngine.restoreContext]. */
+data class RestoredHistoryEntry(val role: String, val content: String, val endPosition: Int)

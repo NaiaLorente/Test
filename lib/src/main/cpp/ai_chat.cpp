@@ -8,8 +8,10 @@
 #include <csignal>
 #include <signal.h>
 #include <ctime>
+#include <fstream>
 #include <string>
 #include <unistd.h>
+#include <vector>
 #include <sampling.h>
 
 #include "logging.h"
@@ -842,10 +844,14 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_getLastReplyStatsNative(JNIEnv 
 /**
  * The model's current chat history after the pinned system message (chat_msgs[0]) - any
  * rolling-summary recap notes folded in by context shifting, plus the still-live raw turns - as
- * a JSON array of {"role", "content"} objects, in order. Lets the Kotlin side snapshot a bounded
- * picture of native memory (never larger than what actually still fits in context) so a later
- * cold-start replay can resume from this instead of always re-seeding the entire, ever-growing
- * raw transcript from scratch. "[]" if no system prompt has been processed yet.
+ * a JSON array of {"role", "content", "endPosition"} objects, in order. Lets the Kotlin side
+ * snapshot a bounded picture of native memory (never larger than what actually still fits in
+ * context) so a later cold-start replay can resume from this instead of always re-seeding the
+ * entire, ever-growing raw transcript from scratch. endPosition (each entry's exact KV-cache
+ * boundary) is only meaningful for restoring a saved raw context state (see
+ * beginContextRestoreNative/appendRestoredEntryNative) - the plain re-seeding replay path ignores
+ * it and recomputes real positions as it decodes each entry. "[]" if no system prompt has been
+ * processed yet.
  */
 extern "C"
 JNIEXPORT jstring JNICALL
@@ -854,11 +860,172 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_getCompactedHistoryNative(JNIEn
     out << "[";
     for (size_t i = 1; i < chat_msgs.size(); i++) {
         if (i > 1) out << ",";
+        const llama_pos end_pos = i < chat_msg_end_positions.size() ? chat_msg_end_positions[i] : current_position;
         out << "{\"role\":\"" << json_escape(chat_msgs[i].role) << "\","
-            << "\"content\":\"" << json_escape(chat_msgs[i].content) << "\"}";
+            << "\"content\":\"" << json_escape(chat_msgs[i].content) << "\","
+            << "\"endPosition\":" << end_pos << "}";
     }
     out << "]";
     return env->NewStringUTF(out.str().c_str());
+}
+
+/** The pinned system/persona message's own end position (chat_msg_end_positions[0]), i.e. where
+ * everything after it starts - needed to correctly resume bookkeeping after restoring a saved raw
+ * context state, since that state itself carries no notion of "messages", only raw KV-cache
+ * contents. 0 if no system prompt has been processed yet. */
+extern "C"
+JNIEXPORT jint JNICALL
+Java_com_arm_aichat_internal_InferenceEngineImpl_getSystemPromptPositionNative(JNIEnv *env, jobject /*unused*/) {
+    return system_prompt_position;
+}
+
+/**
+ * Persists the context's raw internal state (KV-cache contents, sampler RNG state) to [path], so
+ * a later cold start can restore it directly instead of reprocessing the whole system prompt and
+ * conversation from scratch - the actual fix for replay taking minutes on a large system prompt.
+ * Written to a temporary file first and only renamed to the final path once fully written, so an
+ * interrupted save (app killed mid-write) can never leave a corrupt file under the final name for
+ * a later restore to misread as valid.
+ */
+extern "C"
+JNIEXPORT jint JNICALL
+Java_com_arm_aichat_internal_InferenceEngineImpl_saveContextStateNative(JNIEnv *env, jobject /*unused*/, jstring jpath) {
+    g_last_operation = "saveContextStateNative";
+    const auto *path = env->GetStringUTFChars(jpath, nullptr);
+    const std::string path_str(path);
+    env->ReleaseStringUTFChars(jpath, path);
+
+    const size_t state_size = llama_state_get_size(g_context);
+    std::vector<uint8_t> buffer(state_size);
+    const size_t written = llama_state_get_data(g_context, buffer.data(), buffer.size());
+
+    const std::string tmp_path = path_str + ".tmp";
+    {
+        std::ofstream out(tmp_path, std::ios::binary | std::ios::trunc);
+        if (!out) {
+            LOGe("%s: failed to open %s for writing", __func__, tmp_path.c_str());
+            return 1;
+        }
+        out.write(reinterpret_cast<const char *>(buffer.data()), (std::streamsize) written);
+        if (!out) {
+            LOGe("%s: failed to write state to %s", __func__, tmp_path.c_str());
+            out.close();
+            std::remove(tmp_path.c_str());
+            return 2;
+        }
+    }
+    if (std::rename(tmp_path.c_str(), path_str.c_str()) != 0) {
+        LOGe("%s: failed to finalize %s", __func__, path_str.c_str());
+        std::remove(tmp_path.c_str());
+        return 3;
+    }
+    return 0;
+}
+
+/**
+ * Restores the context's raw internal state previously saved by [saveContextStateNative]. Only
+ * touches the KV-cache/sampler state itself - the higher-level bookkeeping (chat_msgs, positions)
+ * that the rest of the completion loop relies on still needs [beginContextRestoreNative] and
+ * [appendRestoredEntryNative] afterwards to match it back up.
+ */
+extern "C"
+JNIEXPORT jint JNICALL
+Java_com_arm_aichat_internal_InferenceEngineImpl_loadContextStateNative(JNIEnv *env, jobject /*unused*/, jstring jpath) {
+    g_last_operation = "loadContextStateNative";
+    const auto *path = env->GetStringUTFChars(jpath, nullptr);
+    const std::string path_str(path);
+    env->ReleaseStringUTFChars(jpath, path);
+
+    std::ifstream in(path_str, std::ios::binary | std::ios::ate);
+    if (!in) {
+        LOGw("%s: no saved state at %s", __func__, path_str.c_str());
+        return 1;
+    }
+    const std::streamsize size = in.tellg();
+    if (size <= 0) {
+        LOGe("%s: saved state at %s is empty", __func__, path_str.c_str());
+        return 2;
+    }
+    in.seekg(0, std::ios::beg);
+    std::vector<uint8_t> buffer((size_t) size);
+    if (!in.read(reinterpret_cast<char *>(buffer.data()), size)) {
+        LOGe("%s: failed to read saved state from %s", __func__, path_str.c_str());
+        return 3;
+    }
+
+    const size_t applied = llama_state_set_data(g_context, buffer.data(), buffer.size());
+    if (applied == 0) {
+        LOGe("%s: llama_state_set_data() rejected the saved state", __func__);
+        return 4;
+    }
+    return 0;
+}
+
+/**
+ * Rebuilds the completion loop's bookkeeping (chat_msgs, position tracking) to match a context
+ * whose raw KV-cache state was just restored via [loadContextStateNative] - the saved state blob
+ * itself carries no notion of "messages", only raw cache contents, so this reconstructs the
+ * pinned system/persona message (chat_msgs[0]) from what the caller already knows it to be,
+ * without decoding anything (the restored KV-cache already has it). Deliberately keeps the
+ * KV-cache untouched (reset_long_term_states(clear_kv_cache = false)) - only [appendRestoredEntryNative]
+ * calls should follow this, never a fresh processSystemPrompt().
+ */
+extern "C"
+JNIEXPORT jint JNICALL
+Java_com_arm_aichat_internal_InferenceEngineImpl_beginContextRestoreNative(
+        JNIEnv *env,
+        jobject /*unused*/,
+        jstring jsystem_prompt,
+        jint system_prompt_pos
+) {
+    g_last_operation = "beginContextRestoreNative";
+    reset_long_term_states(/* clear_kv_cache */ false);
+    reset_short_term_states();
+
+    const auto *system_prompt = env->GetStringUTFChars(jsystem_prompt, nullptr);
+    const std::string content(system_prompt);
+    env->ReleaseStringUTFChars(jsystem_prompt, system_prompt);
+
+    common_chat_msg system_msg;
+    system_msg.role = ROLE_SYSTEM;
+    system_msg.content = content;
+    chat_msgs.push_back(system_msg);
+    chat_msg_end_positions.push_back(system_prompt_pos);
+
+    system_prompt_position = system_prompt_pos;
+    current_position = system_prompt_pos;
+    return 0;
+}
+
+/**
+ * Appends one historical entry's bookkeeping (from a saved [getCompactedHistoryNative] snapshot)
+ * after [beginContextRestoreNative] - no decoding, the restored KV-cache already has these tokens.
+ */
+extern "C"
+JNIEXPORT jint JNICALL
+Java_com_arm_aichat_internal_InferenceEngineImpl_appendRestoredEntryNative(
+        JNIEnv *env,
+        jobject /*unused*/,
+        jstring jrole,
+        jstring jcontent,
+        jint end_position
+) {
+    g_last_operation = "appendRestoredEntryNative";
+    const auto *role = env->GetStringUTFChars(jrole, nullptr);
+    const std::string role_str(role);
+    env->ReleaseStringUTFChars(jrole, role);
+
+    const auto *content = env->GetStringUTFChars(jcontent, nullptr);
+    const std::string content_str(content);
+    env->ReleaseStringUTFChars(jcontent, content);
+
+    common_chat_msg msg;
+    msg.role = role_str;
+    msg.content = content_str;
+    chat_msgs.push_back(msg);
+    chat_msg_end_positions.push_back(end_position);
+    current_position = end_position;
+    return 0;
 }
 
 static int decode_tokens_in_batches(
