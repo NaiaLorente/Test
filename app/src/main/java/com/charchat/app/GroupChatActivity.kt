@@ -338,7 +338,6 @@ class GroupChatActivity : AppCompatActivity() {
         messages.add(Message(UUID.randomUUID().toString(), "", false, isThinking = true, speakerId = character.id))
         messageAdapter.notifyItemInserted(messages.size - 1)
 
-        var stoppedByUser = false
         val generationStartMs = SystemClock.elapsedRealtime()
         val tickerJob = lifecycleScope.launch(Dispatchers.Main) {
             statusTv.visibility = View.VISIBLE
@@ -346,7 +345,6 @@ class GroupChatActivity : AppCompatActivity() {
             stopGenerationButton.isEnabled = true
             stopGenerationButton.setOnClickListener {
                 engine.cancelGeneration()
-                stoppedByUser = true
                 stopGenerationButton.isEnabled = false
             }
             while (isActive) {
@@ -367,10 +365,14 @@ class GroupChatActivity : AppCompatActivity() {
                     val messageCount = messages.size
                     check(messageCount > 0 && !messages[messageCount - 1].isUser)
 
-                    val cleaned = stripSelfNamePrefix(lastAssistantMsg.toString(), character.name)
-                    if (cleaned.isBlank() && stoppedByUser) {
-                        // Stopped before a single token came out - drop the placeholder instead
-                        // of leaving (and persisting) an empty bubble.
+                    val cleaned = trimVoiceBleed(
+                        stripSelfNamePrefix(lastAssistantMsg.toString(), character.name),
+                        character
+                    )
+                    if (cleaned.isBlank()) {
+                        // Stopped before a single token came out, or the entire reply turned out
+                        // to be voice bleed into someone else's line - drop the placeholder
+                        // instead of leaving (and persisting) an empty bubble.
                         messages.removeAt(messageCount - 1)
                         messageAdapter.notifyItemRemoved(messageCount - 1)
                     } else {
@@ -509,6 +511,23 @@ class GroupChatActivity : AppCompatActivity() {
         if (name.isBlank()) return text.trim()
         val prefixRegex = Regex("^\\s*${Regex.escape(name)}\\s*:\\s*", RegexOption.IGNORE_CASE)
         return text.trim().replaceFirst(prefixRegex, "").trim()
+    }
+
+    /**
+     * A turn is only supposed to contain the one character's own line - nothing stops a small
+     * model from imitating the seeded "Name: " pattern again mid-reply and drifting into writing
+     * another character's line, or the user's, in the same generation. Cut the reply at the first
+     * such spillover instead of showing content this character never should have said.
+     */
+    private fun trimVoiceBleed(text: String, speaker: Character): String {
+        val otherNames = (members.map { it.name.ifBlank { "Unnamed" } } + "User")
+            .filterNot { it.equals(speaker.name.ifBlank { "Unnamed" }, ignoreCase = true) }
+            .distinct()
+        if (otherNames.isEmpty()) return text
+        val namePattern = otherNames.joinToString("|") { Regex.escape(it) }
+        val bleedRegex = Regex("(?:^|\\n)\\s*(?:$namePattern)\\s*:", RegexOption.IGNORE_CASE)
+        val match = bleedRegex.find(text) ?: return text
+        return text.substring(0, match.range.first).trim()
     }
 
     private fun confirmClearConversation() {

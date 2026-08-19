@@ -768,6 +768,34 @@ static std::string g_last_reply;
 static std::string g_last_reply_stats;
 
 /**
+ * Trims text back to the end of its last complete sentence, so a reply cut short by the
+ * token-length cap doesn't visibly end mid-word/mid-sentence. A sentence "ends" at '.', '!', or
+ * '?', optionally followed immediately by a closing quote/asterisk/parenthesis (quoted dialogue
+ * or roleplay action markup). Falls back to the original text unchanged if no sentence boundary
+ * exists at all, or if trimming to one would throw away more than half the reply - this is only
+ * meant to smooth a barely-over-the-cap reply, not salvage one that never formed a full sentence.
+ */
+static std::string trim_to_last_sentence(const std::string &text) {
+    static const std::string enders = ".!?";
+    static const std::string trailing_closers = "\"'*)";
+
+    size_t best_end = std::string::npos;
+    for (size_t i = 0; i < text.size(); i++) {
+        if (enders.find(text[i]) == std::string::npos) continue;
+        size_t end = i + 1;
+        while (end < text.size() && trailing_closers.find(text[end]) != std::string::npos) {
+            end++;
+        }
+        best_end = end;
+    }
+
+    if (best_end == std::string::npos || best_end < text.size() / 2) {
+        return text;
+    }
+    return text.substr(0, best_end);
+}
+
+/**
  * Finalizes the assistant's turn regardless of *why* generation stopped (natural end-of-message,
  * or hitting the token-length cap): stores the clean reply into chat history and marks its end
  * position. Without this, a reply cut short by the length cap would never get recorded, leaving
@@ -777,13 +805,19 @@ static std::string g_last_reply_stats;
  * so re-parsing the whole growing reply on every single token was pure wasted CPU time that
  * only got more expensive the longer a reply ran.
  */
-static void finalize_assistant_turn(const char *reason) {
+static void finalize_assistant_turn(const char *reason, bool hit_length_cap) {
     const double elapsed_s = (double) (ggml_time_us() - g_generation_start_us) / 1e6;
     const double tok_per_s = elapsed_s > 0 ? g_generated_token_count / elapsed_s : 0.0;
     LOGw("%s: STOP: %s (%d tokens in %.1fs, %.2f tok/s)",
          __func__, reason, g_generated_token_count, elapsed_s, tok_per_s);
 
-    g_last_reply = current_visible_content(/* is_partial */ false);
+    std::string visible = current_visible_content(/* is_partial */ false);
+    // Only smooth a cap-hit cutoff - a natural end-of-message is already a complete reply, and
+    // trimming it back to an earlier sentence would just needlessly throw away its actual ending.
+    if (hit_length_cap) {
+        visible = trim_to_last_sentence(visible);
+    }
+    g_last_reply = visible;
     std::ostringstream stats;
     stats << g_generated_token_count << " tokens in " << std::fixed << std::setprecision(1) << elapsed_s
           << "s (" << std::setprecision(2) << tok_per_s << " tok/s)";
@@ -1136,7 +1170,7 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_generateNextToken(
 
     // Stop if reaching the marked position
     if (current_position >= stop_generation_position) {
-        finalize_assistant_turn("hit the token-length cap");
+        finalize_assistant_turn("hit the token-length cap", /* hit_length_cap */ true);
         return nullptr;
     }
 
@@ -1157,7 +1191,7 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_generateNextToken(
 
     // Stop if next token is EOG
     if (llama_vocab_is_eog(llama_model_get_vocab(g_model), new_token_id)) {
-        finalize_assistant_turn("reached a natural end-of-message");
+        finalize_assistant_turn("reached a natural end-of-message", /* hit_length_cap */ false);
         return nullptr;
     }
 
