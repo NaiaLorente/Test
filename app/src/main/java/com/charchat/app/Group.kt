@@ -39,7 +39,13 @@ data class Group(
         appendLine("- Keep replies short, like real spoken dialogue: usually 1-4 sentences, occasionally more only if the moment truly calls for it.")
         append("- Talk like an actual person, not an AI assistant. Use casual, natural speech - contractions, sentence fragments, trailing off. Each character has their own moods, opinions, and reactions, and isn't endlessly agreeable just because the user wants something.")
         if (scenario.isNotBlank()) {
-            append("\n\nScene and setting everyone is in right now: ").append(scenario)
+            append(
+                "\n\nScene and setting everyone is in right now - background the user wrote in " +
+                    "their own words, so it may use \"I\"/\"you\" in whatever order felt natural to " +
+                    "them while writing it. However it's phrased, that never changes who's who: when " +
+                    "you voice a character (per a \"[Name's turn]\" cue), \"I\" is always that one " +
+                    "character, and the user is always the user, never any character.\n"
+            ).append(scenario)
         }
         members.forEach { character ->
             append("\n\n== ${character.name.ifBlank { "Unnamed" }} ==")

@@ -47,7 +47,13 @@ data class Character(
                 append("\n\nPersonality and current mood: ").append(personality)
             }
             if (scenario.isNotBlank()) {
-                append("\n\nScene and setting you're both in right now: ").append(scenario)
+                append(
+                    "\n\nScene and setting you're both in right now - background the user wrote " +
+                        "in their own words, so it may use \"I\"/\"you\" in whatever order felt " +
+                        "natural to them while writing it. However it's phrased, that never changes " +
+                        "who's who: you are always $who, and the other person in it is always the " +
+                        "user, never you.\n"
+                ).append(scenario)
             }
             if (userPersona.isNotBlank()) {
                 append("\n\nBackground on who the user is in this scene (for your own understanding only): ")
