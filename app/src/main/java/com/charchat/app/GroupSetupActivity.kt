@@ -17,6 +17,7 @@ import com.google.android.material.button.MaterialButton
 import com.google.android.material.imageview.ShapeableImageView
 import com.google.android.material.slider.Slider
 import com.google.android.material.textfield.TextInputEditText
+import org.json.JSONObject
 
 /**
  * Picks [MIN_GROUP_SIZE]-[MAX_GROUP_SIZE] existing characters to start a group chat: one shared
@@ -25,6 +26,7 @@ import com.google.android.material.textfield.TextInputEditText
  */
 class GroupSetupActivity : AppCompatActivity() {
 
+    private lateinit var titleTv: TextView
     private lateinit var selectionCountTv: TextView
     private lateinit var charactersRv: RecyclerView
     private lateinit var nameEt: TextInputEditText
@@ -37,6 +39,7 @@ class GroupSetupActivity : AppCompatActivity() {
     private val allCharacters = mutableListOf<Character>()
     private val selectedIds = mutableSetOf<String>()
     private lateinit var adapter: SelectableCharacterAdapter
+    private var editingId: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -44,6 +47,7 @@ class GroupSetupActivity : AppCompatActivity() {
         setContentView(R.layout.activity_group_setup)
         findViewById<View>(R.id.group_setup_root).applySystemBarInsetsAsPadding()
 
+        titleTv = findViewById(R.id.group_setup_title)
         selectionCountTv = findViewById(R.id.group_selection_count)
         charactersRv = findViewById(R.id.group_characters_rv)
         nameEt = findViewById(R.id.group_name_input)
@@ -58,12 +62,28 @@ class GroupSetupActivity : AppCompatActivity() {
         creativitySlider.addOnChangeListener { _, value, _ -> updateCreativityText(value) }
 
         allCharacters.addAll(ConversationStore.listCharacters(this))
+
+        intent.getStringExtra(EXTRA_EDIT_GROUP_JSON)?.let { json ->
+            prefill(Group.fromJson(JSONObject(json)))
+        }
+
         adapter = SelectableCharacterAdapter(allCharacters, selectedIds) { toggle(it) }
         charactersRv.layoutManager = LinearLayoutManager(this)
         charactersRv.adapter = adapter
         updateSelectionCount()
 
         startButton.setOnClickListener { submit() }
+    }
+
+    private fun prefill(group: Group) {
+        editingId = group.id
+        titleTv.text = "Edit group chat"
+        startButton.text = "Save changes"
+        nameEt.setText(group.name)
+        scenarioEt.setText(group.scenario)
+        creativitySlider.value = group.creativity
+        updateCreativityText(group.creativity)
+        selectedIds.addAll(group.characterIds)
     }
 
     private fun toggle(character: Character) {
@@ -97,7 +117,15 @@ class GroupSetupActivity : AppCompatActivity() {
 
         // Preserve the order characters are shown in, not JSON set-iteration order.
         val orderedIds = allCharacters.map { it.id }.filter { it in selectedIds }
-        val group = Group(
+        val group = editingId?.let { id ->
+            Group(
+                id = id,
+                name = nameEt.text.toString().trim(),
+                characterIds = orderedIds,
+                scenario = scenarioEt.text.toString().trim(),
+                creativity = creativitySlider.value
+            )
+        } ?: Group(
             name = nameEt.text.toString().trim(),
             characterIds = orderedIds,
             scenario = scenarioEt.text.toString().trim(),
@@ -110,6 +138,7 @@ class GroupSetupActivity : AppCompatActivity() {
 
     companion object {
         const val EXTRA_GROUP_JSON = "group_json"
+        const val EXTRA_EDIT_GROUP_JSON = "edit_group_json"
     }
 }
 

@@ -13,6 +13,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
@@ -32,6 +33,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import java.util.UUID
 
 /**
@@ -46,6 +48,7 @@ class GroupChatActivity : AppCompatActivity() {
     private lateinit var headerAvatars: LinearLayout
     private lateinit var headerName: TextView
     private lateinit var statusTv: TextView
+    private lateinit var stopGenerationButton: TextView
     private lateinit var messagesRv: RecyclerView
     private lateinit var speakerRow: LinearLayout
     private lateinit var userInputEt: TextInputEditText
@@ -68,7 +71,11 @@ class GroupChatActivity : AppCompatActivity() {
 
     private val messages = mutableListOf<Message>()
     private val lastAssistantMsg = StringBuilder()
-    private val messageAdapter = MessageAdapter(messages)
+    private val messageAdapter = MessageAdapter(
+        messages,
+        onRegenerateLast = { regenerateLastReply() },
+        onEditLastUser = { startEditingLastUserMessage() }
+    )
     private val speakerChips = mutableListOf<View>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -98,6 +105,17 @@ class GroupChatActivity : AppCompatActivity() {
         toolbar.setNavigationOnClickListener { finish() }
         toolbar.setOnMenuItemClickListener { item ->
             when (item.itemId) {
+                R.id.action_edit_group -> {
+                    if (isGenerating) {
+                        Toast.makeText(this, "Wait for the current reply to finish first", Toast.LENGTH_SHORT).show()
+                    } else {
+                        editGroup.launch(
+                            Intent(this, GroupSetupActivity::class.java)
+                                .putExtra(GroupSetupActivity.EXTRA_EDIT_GROUP_JSON, group.toJson().toString())
+                        )
+                    }
+                    true
+                }
                 R.id.action_clear_group_conversation -> {
                     confirmClearConversation()
                     true
@@ -109,6 +127,7 @@ class GroupChatActivity : AppCompatActivity() {
         headerAvatars = findViewById(R.id.group_header_avatars)
         headerName = findViewById(R.id.group_header_name)
         statusTv = findViewById(R.id.group_status_tv)
+        stopGenerationButton = findViewById(R.id.group_stop_generation_button)
         messagesRv = findViewById(R.id.group_messages)
         messagesRv.layoutManager = LinearLayoutManager(this).apply { stackFromEnd = true }
         messageAdapter.speakers = membersById
@@ -198,13 +217,13 @@ class GroupChatActivity : AppCompatActivity() {
      * character's past line is seeded behind a "[Name's turn]" director cue naming who said it,
      * so the shared history stays unambiguous about who is speaking.
      */
-    private suspend fun replayConversation() {
+    private suspend fun replayConversation(tickerLabel: String = "Loading conversation") {
         val startMs = SystemClock.elapsedRealtime()
         val tickerJob = lifecycleScope.launch(Dispatchers.Main) {
             statusTv.visibility = View.VISIBLE
             while (isActive) {
                 val elapsedS = (SystemClock.elapsedRealtime() - startMs) / 1000
-                statusTv.text = "Loading conversation... ${elapsedS}s"
+                statusTv.text = "$tickerLabel... ${elapsedS}s"
                 delay(1000)
             }
         }
@@ -230,6 +249,7 @@ class GroupChatActivity : AppCompatActivity() {
                 userInputEt.isEnabled = true
                 sendFab.isEnabled = true
                 speakerChips.forEach { it.isEnabled = true }
+                toolbar.menu.findItem(R.id.action_edit_group)?.isEnabled = true
                 toolbar.menu.findItem(R.id.action_clear_group_conversation)?.isEnabled = true
             }
         } catch (e: Exception) {
@@ -294,9 +314,17 @@ class GroupChatActivity : AppCompatActivity() {
         messages.add(Message(UUID.randomUUID().toString(), "", false, isThinking = true, speakerId = character.id))
         messageAdapter.notifyItemInserted(messages.size - 1)
 
+        var stoppedByUser = false
         val generationStartMs = SystemClock.elapsedRealtime()
         val tickerJob = lifecycleScope.launch(Dispatchers.Main) {
             statusTv.visibility = View.VISIBLE
+            stopGenerationButton.visibility = View.VISIBLE
+            stopGenerationButton.isEnabled = true
+            stopGenerationButton.setOnClickListener {
+                engine.cancelGeneration()
+                stoppedByUser = true
+                stopGenerationButton.isEnabled = false
+            }
             while (isActive) {
                 val elapsedS = (SystemClock.elapsedRealtime() - generationStartMs) / 1000
                 statusTv.text = "${character.name.ifBlank { "They" }} is replying... ${elapsedS}s"
@@ -311,16 +339,23 @@ class GroupChatActivity : AppCompatActivity() {
                 tickerJob.cancel()
                 withContext(Dispatchers.Main) {
                     statusTv.visibility = View.GONE
+                    stopGenerationButton.visibility = View.GONE
                     val messageCount = messages.size
                     check(messageCount > 0 && !messages[messageCount - 1].isUser)
 
                     val cleaned = stripSelfNamePrefix(lastAssistantMsg.toString(), character.name)
-                    messages.removeAt(messageCount - 1).copy(
-                        content = cleaned,
-                        isThinking = false
-                    ).let { messages.add(it) }
-
-                    messageAdapter.notifyItemChanged(messages.size - 1)
+                    if (cleaned.isBlank() && stoppedByUser) {
+                        // Stopped before a single token came out - drop the placeholder instead
+                        // of leaving (and persisting) an empty bubble.
+                        messages.removeAt(messageCount - 1)
+                        messageAdapter.notifyItemRemoved(messageCount - 1)
+                    } else {
+                        messages.removeAt(messageCount - 1).copy(
+                            content = cleaned,
+                            isThinking = false
+                        ).let { messages.add(it) }
+                        messageAdapter.notifyItemChanged(messages.size - 1)
+                    }
                     userInputEt.isEnabled = true
                     sendFab.isEnabled = true
                     speakerChips.forEach { it.isEnabled = true }
@@ -340,6 +375,7 @@ class GroupChatActivity : AppCompatActivity() {
                 val detail = "${e.javaClass.simpleName}: ${e.message}\n\n${e.stackTraceToString()}"
                 withContext(Dispatchers.Main) {
                     statusTv.text = "Error generating a reply."
+                    stopGenerationButton.visibility = View.GONE
                     val messageCount = messages.size
                     if (messageCount > 0 && messages[messageCount - 1].isThinking) {
                         messages.removeAt(messageCount - 1)
@@ -354,6 +390,90 @@ class GroupChatActivity : AppCompatActivity() {
                 persist()
             }
         }
+    }
+
+    /**
+     * Drops the last reply and asks the same character for a fresh one - mirrors
+     * [ChatActivity.regenerateLastReply], resyncing the model's context to just before that line
+     * and then re-issuing the same "[Name's turn]" cue.
+     */
+    private fun regenerateLastReply() {
+        if (!isReady || isGenerating) return
+        val lastIndex = messages.lastIndex
+        if (lastIndex < 0) return
+        val lastMessage = messages[lastIndex]
+        if (lastMessage.isUser || lastMessage.isThinking) return
+        val character = lastMessage.speakerId?.let { membersById[it] } ?: return
+
+        messages.removeAt(lastIndex)
+        messageAdapter.notifyItemRemoved(lastIndex)
+        persist()
+        resyncThenRun { generateAsCharacter(character) }
+    }
+
+    /**
+     * Removes the last user message (and the reply it got, if any) and puts its text back in the
+     * input box to edit - mirrors [ChatActivity.startEditingLastUserMessage].
+     */
+    private fun startEditingLastUserMessage() {
+        if (!isReady || isGenerating) return
+        val lastIndex = messages.lastIndex
+        if (lastIndex < 0) return
+
+        val (userIndex, removeCount) = when {
+            messages[lastIndex].isUser -> lastIndex to 1
+            lastIndex - 1 >= 0 && messages[lastIndex - 1].isUser && !messages[lastIndex].isThinking -> (lastIndex - 1) to 2
+            else -> return
+        }
+        val userText = messages[userIndex].content
+
+        repeat(removeCount) { messages.removeAt(messages.lastIndex) }
+        messageAdapter.notifyItemRangeRemoved(userIndex, removeCount)
+        persist()
+        resyncThenRun {
+            userInputEt.setText(userText)
+            userInputEt.setSelection(userText.length)
+            userInputEt.requestFocus()
+        }
+    }
+
+    /** Resets and replays the (already-trimmed) [messages] list, then runs [onReady] on the main thread. */
+    private fun resyncThenRun(onReady: () -> Unit) {
+        isReady = false
+        userInputEt.isEnabled = false
+        sendFab.isEnabled = false
+        speakerChips.forEach { it.isEnabled = false }
+        lifecycleScope.launch(Dispatchers.Default) {
+            replayConversation(tickerLabel = "Preparing")
+            withContext(Dispatchers.Main) { onReady() }
+        }
+    }
+
+    private val editGroup = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val json = result.data?.getStringExtra(GroupSetupActivity.EXTRA_GROUP_JSON) ?: return@registerForActivityResult
+        group = Group.fromJson(JSONObject(json))
+
+        val allCharacters = ConversationStore.listCharacters(this).associateBy { it.id }
+        members = group.characterIds.mapNotNull { allCharacters[it] }
+        if (members.size < MIN_GROUP_SIZE) {
+            Toast.makeText(this, "Not enough of this group's characters are left", Toast.LENGTH_LONG).show()
+            finish()
+            return@registerForActivityResult
+        }
+        membersById = members.associateBy { it.id }
+
+        headerName.text = group.displayName(members)
+        buildHeaderAvatars()
+        buildSpeakerRow()
+        messageAdapter.speakers = membersById
+        persist()
+
+        // The system prompt depends on the group's scenario and member list, either of which may
+        // have just changed - resync the model's actual context to match instead of leaving it
+        // built from the pre-edit version.
+        resyncThenRun {}
     }
 
     /**
@@ -387,6 +507,7 @@ class GroupChatActivity : AppCompatActivity() {
         userInputEt.isEnabled = false
         sendFab.isEnabled = false
         speakerChips.forEach { it.isEnabled = false }
+        toolbar.menu.findItem(R.id.action_edit_group)?.isEnabled = false
         toolbar.menu.findItem(R.id.action_clear_group_conversation)?.isEnabled = false
 
         lifecycleScope.launch(Dispatchers.Default) { replayConversation() }

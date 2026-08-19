@@ -2,6 +2,11 @@
 <menu xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
     <item
+        android:id="@+id/action_edit_group"
+        android:title="Edit group"
+        android:enabled="false"
+        app:showAsAction="never" />
+    <item
         android:id="@+id/action_clear_group_conversation"
         android:title="Clear conversation"
         android:enabled="false"

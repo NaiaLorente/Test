@@ -71,15 +71,38 @@
 
         </LinearLayout>
 
-        <TextView
-            android:id="@+id/status_tv"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
             android:paddingHorizontal="16dp"
-            android:paddingVertical="8dp"
-            android:textColor="@color/on_surface_variant"
-            style="@style/TextAppearance.CharChat.Body.Caption"
-            android:text="Loading conversation..." />
+            android:paddingVertical="6dp">
+
+            <TextView
+                android:id="@+id/status_tv"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:paddingVertical="2dp"
+                android:textColor="@color/on_surface_variant"
+                style="@style/TextAppearance.CharChat.Body.Caption"
+                android:text="Loading conversation..." />
+
+            <TextView
+                android:id="@+id/stop_generation_button"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:paddingHorizontal="12dp"
+                android:paddingVertical="4dp"
+                android:background="@drawable/bg_stop_button"
+                android:text="Stop"
+                android:textColor="@color/on_background"
+                android:visibility="gone"
+                style="@style/TextAppearance.CharChat.Body.LabelSmall" />
+
+        </LinearLayout>
 
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/messages"

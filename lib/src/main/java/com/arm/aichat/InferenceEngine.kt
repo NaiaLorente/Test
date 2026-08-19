@@ -61,6 +61,13 @@ interface InferenceEngine {
     suspend fun bench(pp: Int, tg: Int, pl: Int, nr: Int = 1): String
 
     /**
+     * Signals the currently in-flight [sendUserPrompt] generation, if any, to stop after its
+     * current token - the collector's flow simply completes with whatever was generated so far,
+     * rather than throwing or needing to be torn down. Safe to call even if nothing is generating.
+     */
+    fun cancelGeneration()
+
+    /**
      * Unloads the currently loaded model.
      */
     fun cleanUp()

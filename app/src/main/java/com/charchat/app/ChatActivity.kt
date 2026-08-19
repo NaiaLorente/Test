@@ -49,6 +49,7 @@ class ChatActivity : AppCompatActivity() {
     private lateinit var headerAvatarLetter: TextView
     private lateinit var headerName: TextView
     private lateinit var statusTv: TextView
+    private lateinit var stopGenerationButton: TextView
     private lateinit var messagesRv: RecyclerView
     private lateinit var userInputEt: TextInputEditText
     private lateinit var sendFab: FloatingActionButton
@@ -110,6 +111,7 @@ class ChatActivity : AppCompatActivity() {
         headerAvatarLetter = findViewById(R.id.header_avatar_letter)
         headerName = findViewById(R.id.header_name)
         statusTv = findViewById(R.id.status_tv)
+        stopGenerationButton = findViewById(R.id.stop_generation_button)
         messagesRv = findViewById(R.id.messages)
         messagesRv.layoutManager = LinearLayoutManager(this).apply { stackFromEnd = true }
         messagesRv.adapter = messageAdapter
@@ -300,9 +302,17 @@ class ChatActivity : AppCompatActivity() {
         // A live elapsed-time readout while waiting, so a long wait is visibly "still working"
         // rather than indistinguishable silence from something actually stuck - and gives a
         // precise number to report back instead of an estimate like "about 7 minutes".
+        var stoppedByUser = false
         val generationStartMs = SystemClock.elapsedRealtime()
         val tickerJob = lifecycleScope.launch(Dispatchers.Main) {
             statusTv.visibility = View.VISIBLE
+            stopGenerationButton.visibility = View.VISIBLE
+            stopGenerationButton.isEnabled = true
+            stopGenerationButton.setOnClickListener {
+                engine.cancelGeneration()
+                stoppedByUser = true
+                stopGenerationButton.isEnabled = false
+            }
             while (isActive) {
                 val elapsedS = (SystemClock.elapsedRealtime() - generationStartMs) / 1000
                 statusTv.text = "Thinking... ${elapsedS}s"
@@ -318,15 +328,23 @@ class ChatActivity : AppCompatActivity() {
                 tickerJob.cancel()
                 withContext(Dispatchers.Main) {
                     statusTv.visibility = View.GONE
+                    stopGenerationButton.visibility = View.GONE
                     val messageCount = messages.size
                     check(messageCount > 0 && !messages[messageCount - 1].isUser)
 
-                    messages.removeAt(messageCount - 1).copy(
-                        content = lastAssistantMsg.toString(),
-                        isThinking = false
-                    ).let { messages.add(it) }
-
-                    messageAdapter.notifyItemChanged(messages.size - 1)
+                    val finalText = lastAssistantMsg.toString()
+                    if (finalText.isBlank() && stoppedByUser) {
+                        // Stopped before a single token came out - drop the placeholder instead
+                        // of leaving (and persisting) an empty bubble.
+                        messages.removeAt(messageCount - 1)
+                        messageAdapter.notifyItemRemoved(messageCount - 1)
+                    } else {
+                        messages.removeAt(messageCount - 1).copy(
+                            content = finalText,
+                            isThinking = false
+                        ).let { messages.add(it) }
+                        messageAdapter.notifyItemChanged(messages.size - 1)
+                    }
                     userInputEt.isEnabled = true
                     sendFab.isEnabled = true
                 }
@@ -344,6 +362,7 @@ class ChatActivity : AppCompatActivity() {
                 val detail = "${e.javaClass.simpleName}: ${e.message}\n\n${e.stackTraceToString()}"
                 withContext(Dispatchers.Main) {
                     statusTv.text = "Error generating a reply."
+                    stopGenerationButton.visibility = View.GONE
                     val messageCount = messages.size
                     if (messageCount > 0 && messages[messageCount - 1].isThinking) {
                         messages.removeAt(messageCount - 1)

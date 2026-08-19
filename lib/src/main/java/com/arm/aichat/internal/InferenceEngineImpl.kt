@@ -348,6 +348,11 @@ internal class InferenceEngineImpl private constructor(
             }
             if (_cancelGeneration) {
                 Log.i(TAG, "Assistant generation aborted per requested.")
+                // Reset so the *next* sendUserPrompt() call isn't aborted before it starts too -
+                // cleanUp()/destroy() also set this flag, but always follow it with either
+                // unloading the model or a fresh loadModel() that resets it; cancelGeneration()
+                // doesn't, since the whole point is to keep the model loaded and ready for reuse.
+                _cancelGeneration = false
             } else {
                 Log.i(TAG, "Assistant generation complete: ${getLastReplyStatsNative()}")
                 emit(getLastReplyNative())
@@ -365,6 +370,16 @@ internal class InferenceEngineImpl private constructor(
     }.flowOn(llamaDispatcher)
 
     override fun lastReplyStats(): String = runCatching { getLastReplyStatsNative() }.getOrDefault("")
+
+    /**
+     * A plain volatile-flag write, safe from any thread and cheap enough not to need the
+     * single-threaded llamaDispatcher: [sendUserPrompt]'s generation loop already polls this flag
+     * itself between tokens (see ai_chat.cpp), so setting it here is all that's needed to make it
+     * stop on its own next iteration.
+     */
+    override fun cancelGeneration() {
+        _cancelGeneration = true
+    }
 
     /**
      * Benchmark the model
