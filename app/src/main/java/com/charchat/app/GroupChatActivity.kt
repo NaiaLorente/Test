@@ -21,6 +21,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.arm.aichat.AiChat
 import com.arm.aichat.InferenceEngine
+import com.arm.aichat.RestoredHistoryEntry
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.imageview.ShapeableImageView
@@ -214,7 +215,8 @@ class GroupChatActivity : AppCompatActivity() {
         val stateFile = ConversationStore.groupContextStateFile(this, group.id)
         if (!engine.loadContextState(stateFile.path)) return@runCatching false
 
-        engine.restoreContext(systemPrompt, metadata.systemPromptPosition, metadata.entries)
+        val restoredEntries = metadata.entries.map { RestoredHistoryEntry(it.role, it.content, it.endPosition) }
+        engine.restoreContext(systemPrompt, metadata.systemPromptPosition, restoredEntries)
         engine.setTemperature(group.creativity)
         for (message in messages.drop(metadata.coveredMessageCount)) {
             if (message.content.isBlank()) continue
