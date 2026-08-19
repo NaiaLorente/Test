@@ -99,6 +99,13 @@ constexpr int   SAMPLER_DRY_LAST_N       = 512;
 // little given the incoherence this was meant to guard against was still observed at 0.05.
 constexpr float SAMPLER_MIN_P            = 0.1f;
 
+// top-p keeps only the smallest set of tokens whose probabilities add up to this fraction of the
+// total - a second, complementary guard against the same long, unlikely tail min-p trims, applied
+// before it in the chain. Same story as min-p: common_params_sampling defaults to 0.95 for this if
+// left unset, which was previously happening here implicitly - pinned explicitly and tightened a
+// little for the same reason.
+constexpr float SAMPLER_TOP_P            = 0.9f;
+
 /**
  * Rolling-summary memory: when the context fills up, older messages are condensed into a short
  * summary (via a short, isolated generation) instead of being silently dropped, so identity and
@@ -296,6 +303,7 @@ static common_sampler *new_sampler(float temp) {
     sparams.dry_multiplier = SAMPLER_DRY_MULTIPLIER;
     sparams.dry_penalty_last_n = SAMPLER_DRY_LAST_N;
     sparams.min_p = SAMPLER_MIN_P;
+    sparams.top_p = SAMPLER_TOP_P;
     return common_sampler_init(g_model, sparams);
 }
 
