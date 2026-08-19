@@ -219,11 +219,12 @@ class GroupChatActivity : AppCompatActivity() {
      * character's past line is seeded behind a "[Name's turn]" director cue naming who said it,
      * so the shared history stays unambiguous about who is speaking.
      *
-     * See [ChatActivity.replayConversation] for what [useCachedHistory] does: skips re-seeding the
-     * entire raw transcript on a cold start if an earlier replay saved a bounded snapshot, left
-     * false anywhere the [messages] list was just trimmed (regenerate/edit-last/clear/edit-group).
+     * See [ChatActivity.replayConversation] for what [useCachedHistory] (on by default) does: skips
+     * re-seeding the entire raw transcript if an earlier replay saved a bounded snapshot - safe
+     * even right after regenerate/edit-last/edit-group trim or change the [messages] list, since a
+     * snapshot covering more than the current list is never used, falling back to a full replay.
      */
-    private suspend fun replayConversation(tickerLabel: String = "Loading conversation", useCachedHistory: Boolean = false) {
+    private suspend fun replayConversation(tickerLabel: String = "Loading conversation", useCachedHistory: Boolean = true) {
         val startMs = SystemClock.elapsedRealtime()
         val tickerJob = lifecycleScope.launch(Dispatchers.Main) {
             statusTv.visibility = View.VISIBLE
@@ -463,14 +464,20 @@ class GroupChatActivity : AppCompatActivity() {
         }
     }
 
-    /** Resets and replays the (already-trimmed) [messages] list, then runs [onReady] on the main thread. */
-    private fun resyncThenRun(onReady: () -> Unit) {
+    /**
+     * Resets and replays the (already-trimmed) [messages] list, then runs [onReady] on the main
+     * thread. [useCachedHistory] defaults to true (see [replayConversation]), but is turned off by
+     * the group-edit flow: a saved snapshot can contain cues/lines from a member who was just
+     * removed from the group, which the raw-[messages] replay path knows to filter out (via
+     * [membersById]) but a cached snapshot's already-seeded content does not.
+     */
+    private fun resyncThenRun(useCachedHistory: Boolean = true, onReady: () -> Unit) {
         isReady = false
         userInputEt.isEnabled = false
         sendFab.isEnabled = false
         speakerChips.forEach { it.isEnabled = false }
         lifecycleScope.launch(Dispatchers.Default) {
-            replayConversation(tickerLabel = "Preparing")
+            replayConversation(tickerLabel = "Preparing", useCachedHistory = useCachedHistory)
             withContext(Dispatchers.Main) { onReady() }
         }
     }
@@ -498,8 +505,9 @@ class GroupChatActivity : AppCompatActivity() {
 
         // The system prompt depends on the group's scenario and member list, either of which may
         // have just changed - resync the model's actual context to match instead of leaving it
-        // built from the pre-edit version.
-        resyncThenRun {}
+        // built from the pre-edit version. useCachedHistory=false: a saved snapshot could still
+        // include a just-removed member's lines that a full raw replay knows to filter out.
+        resyncThenRun(useCachedHistory = false) {}
     }
 
     /**

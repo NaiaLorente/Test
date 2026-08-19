@@ -146,7 +146,7 @@ class ChatActivity : AppCompatActivity() {
                 }
                 return@launch
             }
-            replayConversation(useCachedHistory = true)
+            replayConversation()
         }
     }
 
@@ -189,15 +189,16 @@ class ChatActivity : AppCompatActivity() {
      * restoring the UI list. A brand-new character (no messages yet) gets its greeting seeded and
      * saved as the first message, so from then on this is the only path that ever runs.
      *
-     * [useCachedHistory] lets a cold app start skip re-seeding the entire, ever-growing raw
+     * [useCachedHistory] (on by default) lets a replay skip re-seeding the entire, ever-growing raw
      * transcript from scratch: if a [ConversationStore.loadCompactedHistory] snapshot was saved by
      * an earlier replay, only that (bounded by the context window) plus whatever messages came
-     * after it need to be seeded. Left false for regenerate/edit-last/clear, which already work
-     * against a just-trimmed [messages] list that a stale snapshot could otherwise mismatch.
-     * Either way, a fresh snapshot of the model's now-current memory is saved at the end, so the
-     * *next* replay - cold start or not - can benefit from it.
+     * after it need to be seeded. Safe even right after regenerate/edit-last trim the [messages]
+     * list, since the snapshot is only used if it covers no more than the current (possibly just
+     * shortened) list - a snapshot that covers more than that falls back to a full replay instead
+     * of risking a mismatch. Either way, a fresh snapshot of the model's now-current memory is
+     * saved at the end, so the *next* replay can benefit from it too.
      */
-    private suspend fun replayConversation(tickerLabel: String = "Loading conversation", useCachedHistory: Boolean = false) {
+    private suspend fun replayConversation(tickerLabel: String = "Loading conversation", useCachedHistory: Boolean = true) {
         // A live elapsed-time readout, same reasoning as the generation ticker in
         // handleUserInput(): setting up a fresh character (system prompt + greeting) is its own
         // separate step that can take a while on a slow/misbehaving model, and this makes a long
