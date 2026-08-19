@@ -29,8 +29,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
-import java.io.FileOutputStream
-import java.io.InputStream
 
 /**
  * Launcher screen: gates on loading a GGUF model once, then shows every saved character as a
@@ -249,8 +247,10 @@ class CharacterGalleryActivity : AppCompatActivity() {
                 val modelFile = contentResolver.openInputStream(uri)?.use {
                     GgufMetadataReader.create().readStructuredMetadata(it)
                 }?.let { metadata ->
-                    val modelName = metadata.filename() + FILE_EXTENSION_GGUF
-                    contentResolver.openInputStream(uri)?.use { input -> ensureModelFile(modelName, input) }
+                    contentResolver.openInputStream(uri)?.use { input ->
+                        withContext(Dispatchers.Main) { statusTv.text = "Copying the model..." }
+                        ModelStorage.ensureModelFile(this@CharacterGalleryActivity, metadata.filename(), input)
+                    }
                 }
 
                 if (modelFile == null) {
@@ -274,18 +274,6 @@ class CharacterGalleryActivity : AppCompatActivity() {
             }
         }
     }
-
-    private suspend fun ensureModelFile(modelName: String, input: InputStream) =
-        withContext(Dispatchers.IO) {
-            File(ModelStorage.modelsDirectory(this@CharacterGalleryActivity), modelName).also { file ->
-                if (!file.exists()) {
-                    withContext(Dispatchers.Main) { statusTv.text = "Copying the model..." }
-                    FileOutputStream(file).use { input.copyTo(it) }
-                } else {
-                    Log.i(TAG, "File already exists $modelName")
-                }
-            }
-        }
 
     private fun onModelReady(modelName: String? = null) {
         isModelReady = true

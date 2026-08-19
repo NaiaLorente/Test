@@ -2,7 +2,12 @@ package com.charchat.app
 
 import android.content.Context
 import com.arm.aichat.gguf.GgufMetadata
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
+import java.io.InputStream
 
 const val FILE_EXTENSION_GGUF = ".gguf"
 
@@ -47,6 +52,46 @@ object ModelStorage {
         if (!marker.exists()) return null
         val name = runCatching { marker.readText().trim() }.getOrNull()?.takeIf { it.isNotBlank() } ?: return null
         return name.takeIf { File(modelsDirectory(context), it).exists() }
+    }
+
+    /**
+     * Copies [input] into the models directory under a name derived from [rawName] (typically a
+     * GGUF's own "general.name" metadata - free-form text out of a file the user picked, not to
+     * be trusted as a path fragment), returning the resulting file. Two things a raw copy-by-name
+     * would get wrong:
+     * - The name is sanitized to a safe charset first, so a model whose metadata contains "../"
+     *   segments (or is simply oddly named) can't write outside the models directory - it would
+     *   otherwise resolve as a real filesystem path via File(parent, child).
+     * - The copy lands in a temporary ".part" file first and is only renamed to its final name
+     *   once fully written. Without that, an interrupted copy (app killed, storage fills up
+     *   mid-copy) leaves a partial file sitting under the final name, which every future "add
+     *   this model" attempt would then treat as already present and never re-copy - a silently
+     *   permanent, unrecoverable-by-reimporting corrupt file.
+     * Already-present files are left untouched and returned as-is (no wasted re-copy).
+     */
+    suspend fun ensureModelFile(context: Context, rawName: String, input: InputStream): File =
+        withContext(Dispatchers.IO) {
+            val dir = modelsDirectory(context)
+            val finalFile = File(dir, sanitizedModelFileName(rawName))
+            if (finalFile.exists()) return@withContext finalFile
+
+            val tempFile = File(dir, "${finalFile.name}.part")
+            try {
+                FileOutputStream(tempFile).use { out -> input.copyTo(out) }
+                if (!tempFile.renameTo(finalFile)) {
+                    throw IOException("Failed to finalize the copied model file")
+                }
+            } catch (e: Exception) {
+                tempFile.delete()
+                throw e
+            }
+            finalFile
+        }
+
+    /** Keeps only characters safe as a filename across Android filesystems - no path separators. */
+    private fun sanitizedModelFileName(rawName: String): String {
+        val base = rawName.filter { it.isLetterOrDigit() || it == '-' || it == '_' }.take(120)
+        return base.ifBlank { "model-${System.currentTimeMillis()}" } + FILE_EXTENSION_GGUF
     }
 
     fun formatSize(bytes: Long): String {

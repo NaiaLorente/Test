@@ -30,8 +30,6 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.FileOutputStream
-import java.io.InputStream
 
 /**
  * Lets the user see every downloaded GGUF model, switch which one is loaded, delete ones no
@@ -187,8 +185,10 @@ class ModelManagerActivity : AppCompatActivity() {
                 val modelFile = contentResolver.openInputStream(uri)?.use {
                     GgufMetadataReader.create().readStructuredMetadata(it)
                 }?.let { metadata ->
-                    val modelName = metadata.filename() + FILE_EXTENSION_GGUF
-                    contentResolver.openInputStream(uri)?.use { input -> ensureModelFile(modelName, input) }
+                    contentResolver.openInputStream(uri)?.use { input ->
+                        withContext(Dispatchers.Main) { statusTv.text = "Copying the model..." }
+                        ModelStorage.ensureModelFile(this@ModelManagerActivity, metadata.filename(), input)
+                    }
                 }
 
                 if (modelFile == null) {
@@ -225,18 +225,6 @@ class ModelManagerActivity : AppCompatActivity() {
             }
         }
     }
-
-    private suspend fun ensureModelFile(modelName: String, input: InputStream) =
-        withContext(Dispatchers.IO) {
-            File(ModelStorage.modelsDirectory(this@ModelManagerActivity), modelName).also { file ->
-                if (!file.exists()) {
-                    withContext(Dispatchers.Main) { statusTv.text = "Copying the model..." }
-                    FileOutputStream(file).use { input.copyTo(it) }
-                } else {
-                    Log.i(TAG, "File already exists $modelName")
-                }
-            }
-        }
 
     private fun showErrorDetailsDialog(detail: String, title: String) {
         val textView = TextView(this).apply {
