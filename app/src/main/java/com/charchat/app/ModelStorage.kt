@@ -69,7 +69,7 @@ object ModelStorage {
      *   permanent, unrecoverable-by-reimporting corrupt file.
      * Already-present files are left untouched and returned as-is (no wasted re-copy).
      */
-    suspend fun ensureModelFile(context: Context, rawName: String, input: InputStream): File =
+    suspend fun ensureModelFile(context: Context, rawName: String?, input: InputStream): File =
         withContext(Dispatchers.IO) {
             val dir = modelsDirectory(context)
             val finalFile = File(dir, sanitizedModelFileName(rawName))
@@ -89,8 +89,8 @@ object ModelStorage {
         }
 
     /** Keeps only characters safe as a filename across Android filesystems - no path separators. */
-    private fun sanitizedModelFileName(rawName: String): String {
-        val base = rawName.filter { it.isLetterOrDigit() || it == '-' || it == '_' }.take(120)
+    private fun sanitizedModelFileName(rawName: String?): String {
+        val base = rawName.orEmpty().filter { it.isLetterOrDigit() || it == '-' || it == '_' }.take(120)
         return base.ifBlank { "model-${System.currentTimeMillis()}" } + FILE_EXTENSION_GGUF
     }
 
