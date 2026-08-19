@@ -19,7 +19,6 @@ import androidx.recyclerview.widget.RecyclerView
 import com.arm.aichat.AiChat
 import com.arm.aichat.InferenceEngine
 import com.arm.aichat.NATIVE_CRASH_LOG_FILE_NAME
-import com.arm.aichat.gguf.GgufMetadata
 import com.arm.aichat.gguf.GgufMetadataReader
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import kotlinx.coroutines.Dispatchers
@@ -42,6 +41,7 @@ class CharacterGalleryActivity : AppCompatActivity() {
 
     private lateinit var brandHeader: View
     private lateinit var galleryHeader: View
+    private lateinit var loadedModelRow: View
     private lateinit var loadedModelLabel: TextView
     private lateinit var statusTv: TextView
     private lateinit var characterCountTv: TextView
@@ -60,7 +60,9 @@ class CharacterGalleryActivity : AppCompatActivity() {
 
         brandHeader = findViewById(R.id.brand_header)
         galleryHeader = findViewById(R.id.gallery_header)
+        loadedModelRow = findViewById(R.id.loaded_model_row)
         loadedModelLabel = findViewById(R.id.loaded_model_label)
+        loadedModelRow.setOnClickListener { manageModels.launch(Intent(this, ModelManagerActivity::class.java)) }
         statusTv = findViewById(R.id.status_tv)
         characterCountTv = findViewById(R.id.character_count_tv)
         emptyStateTv = findViewById(R.id.empty_state_tv)
@@ -81,8 +83,7 @@ class CharacterGalleryActivity : AppCompatActivity() {
                 // A model is already loaded in the shared singleton engine (e.g. this screen was
                 // recreated after being backgrounded, or a chat screen bounced back here) -
                 // calling loadModel() again would throw, since it requires the Initialized state.
-                val modelName = ensureModelsDirectory().listFiles { f -> f.extension == "gguf" }
-                    ?.maxByOrNull { it.lastModified() }?.name
+                val modelName = ModelStorage.activeModelName(this@CharacterGalleryActivity)
                 withContext(Dispatchers.Main) { onModelReady(modelName) }
             } else {
                 withContext(Dispatchers.Main) { resumeOrPickModel() }
@@ -96,6 +97,14 @@ class CharacterGalleryActivity : AppCompatActivity() {
                 getContent.launch(arrayOf("*/*"))
             }
         }
+    }
+
+    private val manageModels = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val activeName = result.data?.getStringExtra(ModelManagerActivity.EXTRA_ACTIVE_MODEL_NAME) ?: return@registerForActivityResult
+        loadedModelLabel.text = activeName
+        refreshCharacterList()
     }
 
     private fun showAddMenu() {
@@ -153,8 +162,13 @@ class CharacterGalleryActivity : AppCompatActivity() {
     }
 
     private fun resumeOrPickModel() {
-        val existingModel = ensureModelsDirectory().listFiles { f -> f.extension == "gguf" }
-            ?.maxByOrNull { it.lastModified() }
+        // Prefer whichever model was explicitly marked active (set on every successful load,
+        // including an explicit switch from the model manager, which doesn't necessarily touch
+        // file timestamps) - falling back to the most recently modified file for an install from
+        // before that marker existed, or if it's somehow gone missing.
+        val activeName = ModelStorage.activeModelName(this)
+        val existingModel = activeName?.let { File(ModelStorage.modelsDirectory(this), it) }
+            ?: ModelStorage.listModels(this).firstOrNull()
 
         if (existingModel != null) {
             lifecycleScope.launch(Dispatchers.IO) {
@@ -184,6 +198,7 @@ class CharacterGalleryActivity : AppCompatActivity() {
         }
         try {
             engine.loadModel(modelPath)
+            ModelStorage.setActiveModel(this, modelName)
         } finally {
             tickerJob.cancel()
         }
@@ -215,7 +230,7 @@ class CharacterGalleryActivity : AppCompatActivity() {
 
     private suspend fun ensureModelFile(modelName: String, input: InputStream) =
         withContext(Dispatchers.IO) {
-            File(ensureModelsDirectory(), modelName).also { file ->
+            File(ModelStorage.modelsDirectory(this@CharacterGalleryActivity), modelName).also { file ->
                 if (!file.exists()) {
                     withContext(Dispatchers.Main) { statusTv.text = "Copying the model..." }
                     FileOutputStream(file).use { input.copyTo(it) }
@@ -340,35 +355,7 @@ class CharacterGalleryActivity : AppCompatActivity() {
         openGroupChat(group)
     }
 
-    private fun ensureModelsDirectory() =
-        File(filesDir, DIRECTORY_MODELS).also {
-            if (it.exists() && !it.isDirectory) { it.delete() }
-            if (!it.exists()) { it.mkdir() }
-        }
-
     companion object {
         private val TAG = CharacterGalleryActivity::class.java.simpleName
-        private const val DIRECTORY_MODELS = "models"
-        private const val FILE_EXTENSION_GGUF = ".gguf"
-    }
-}
-
-fun GgufMetadata.filename() = when {
-    basic.name != null -> {
-        basic.name?.let { name ->
-            basic.sizeLabel?.let { size ->
-                "$name-$size"
-            } ?: name
-        }
-    }
-    architecture?.architecture != null -> {
-        architecture?.architecture?.let { arch ->
-            basic.uuid?.let { uuid ->
-                "$arch-$uuid"
-            } ?: "$arch-${System.currentTimeMillis()}"
-        }
-    }
-    else -> {
-        "model-${System.currentTimeMillis().toHexString()}"
     }
 }

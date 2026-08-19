@@ -64,16 +64,36 @@
             android:paddingBottom="10dp"
             android:visibility="gone">
 
-            <TextView
-                android:id="@+id/loaded_model_label"
+            <LinearLayout
+                android:id="@+id/loaded_model_row"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:textColor="@color/on_surface_faint"
-                android:textAllCaps="true"
-                android:letterSpacing="0.06"
-                android:maxLines="1"
-                android:ellipsize="end"
-                style="@style/TextAppearance.CharChat.Body.LabelSmall" />
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="?attr/selectableItemBackground"
+                android:paddingVertical="2dp"
+                android:contentDescription="Manage downloaded models">
+
+                <TextView
+                    android:id="@+id/loaded_model_label"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/on_surface_faint"
+                    android:textAllCaps="true"
+                    android:letterSpacing="0.06"
+                    android:maxLines="1"
+                    android:ellipsize="end"
+                    style="@style/TextAppearance.CharChat.Body.LabelSmall" />
+
+                <ImageView
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:src="@drawable/ic_chevron_right_24"
+                    android:tint="@color/on_surface_faint"
+                    android:importantForAccessibility="no" />
+
+            </LinearLayout>
 
             <TextView
                 android:layout_width="match_parent"

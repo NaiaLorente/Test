@@ -1,13 +1,10 @@
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample backup rules file; uncomment and customize as necessary.
-   See https://developer.android.com/guide/topics/data/autobackup
-   for details.
-   Note: This file is ignored for devices older that API 31
-   See https://developer.android.com/about/versions/12/backup-restore
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+   Only applies pre-API 31 (this app's minSdk is 33, so data_extraction_rules.xml is what
+   actually governs backups today) - kept in sync anyway in case minSdk is ever lowered.
+   Downloaded GGUF models can be multiple gigabytes; excluded so a full backup doesn't try to
+   include them.
 -->
 <full-backup-content>
-    <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
--->
+    <exclude domain="file" path="models/" />
 </full-backup-content>

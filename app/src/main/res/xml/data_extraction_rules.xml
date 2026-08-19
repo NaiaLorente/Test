@@ -1,19 +1,16 @@
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample data extraction rules file; uncomment and customize as necessary.
-   See https://developer.android.com/about/versions/12/backup-restore#xml-changes
-   for details.
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+   Downloaded GGUF models can be multiple gigabytes and are re-downloadable/re-pickable by the
+   user at any time - excluded from both cloud backup and device-to-device transfer so Android's
+   Auto Backup doesn't try (and fail/burn quota) to ship them off-device. Characters, groups, and
+   their conversations are plain small JSON files and are intentionally left included, so they
+   survive a reinstall or device transfer.
 -->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
+        <exclude domain="file" path="models/" />
     </cloud-backup>
-    <!--
     <device-transfer>
-        <include .../>
-        <exclude .../>
+        <exclude domain="file" path="models/" />
     </device-transfer>
-    -->
 </data-extraction-rules>
