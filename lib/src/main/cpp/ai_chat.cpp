@@ -34,13 +34,15 @@ constexpr int   N_THREADS_MIN           = 2;
 constexpr int   N_THREADS_MAX           = 4;
 constexpr int   N_THREADS_HEADROOM      = 2;
 
-// Raised again (12288 -> 16384) now that the confirmed-fast daily-driver models are all in the
+// Raised again (16384 -> 20480) now that the confirmed-fast daily-driver models are all in the
 // 3-4B class, which have plenty of RAM headroom to spare for a bigger KV-cache. This is the main
 // lever for "remembers more of the conversation": a bigger raw window means fewer, later
-// evictions before the rolling-summary mechanism below ever needs to kick in at all. Revisit this
-// downward again if a bigger model (7B+) becomes the daily driver, the same way it was cut for
-// the 8B Stheno experiments.
-constexpr int   DEFAULT_CONTEXT_SIZE    = 16384;
+// evictions before the rolling-summary mechanism below ever needs to kick in at all. Kept as a
+// moderate step up rather than doubling, since raw context is the only one of these settings that
+// risks an OOM kill on-device rather than just a slower/lower-quality result - revisit downward
+// again if a bigger model (7B+) becomes the daily driver, the same way it was cut for the 8B
+// Stheno experiments.
+constexpr int   DEFAULT_CONTEXT_SIZE    = 20480;
 constexpr int   OVERFLOW_HEADROOM       = 4;
 constexpr int   BATCH_SIZE              = 512;
 
@@ -62,13 +64,13 @@ constexpr int   SAMPLER_REPEAT_LAST_N   = 256;
  * it allocates (its own KV-cache, batch and sampler) on top of the main one. That was never
  * actually confirmed - the real cause of the crashes chased at the time turned out to be a
  * separate KV-cache position-tracking bug (since fixed), unrelated to summarization. Re-enabling
- * now with SUMMARY_CONTEXT_SIZE cut way down (4096 -> 1024): summarizing a handful of evicted
- * messages into ~200 tokens never needed anywhere near 4096 tokens of context, so this keeps the
- * second context's memory footprint small regardless.
+ * with SUMMARY_CONTEXT_SIZE cut way down from the original 4096: summarizing a handful of evicted
+ * messages into a few hundred tokens never needed anywhere near that much context, so this keeps
+ * the second context's memory footprint small regardless of how big SUMMARY_MAX_NEW_TOKENS gets.
  */
 constexpr bool  ENABLE_ROLLING_SUMMARY     = true;
-constexpr int   SUMMARY_CONTEXT_SIZE       = 1280;
-constexpr int   SUMMARY_MAX_NEW_TOKENS     = 300;
+constexpr int   SUMMARY_CONTEXT_SIZE       = 1536;
+constexpr int   SUMMARY_MAX_NEW_TOKENS     = 400;
 constexpr float SUMMARY_TEMP               = 0.3f;
 constexpr int   MIN_MESSAGES_TO_SUMMARIZE  = 2;
 
@@ -522,10 +524,13 @@ static std::string summarize_messages(const std::vector<common_chat_msg> &to_sum
     }
 
     const std::string prompt =
-            "Summarize the roleplay conversation below in 4-6 short sentences. "
+            "Summarize the roleplay conversation below in 6-9 short sentences. "
             "Keep character names, relationships, locations, and important facts, decisions, or "
             "events - be specific rather than vague, since this summary is the only memory of "
-            "this part of the conversation going forward. "
+            "this part of the conversation going forward. Also note anything that shows how a "
+            "character actually behaves or talks (a distinctive reaction, attitude shift, or "
+            "running dynamic between characters), not just what happened, so their voice stays "
+            "consistent later. "
             "Do not add any commentary, only output the summary itself.\n\n"
             + transcript.str() + "\nSummary:";
 
