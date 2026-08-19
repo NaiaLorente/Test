@@ -20,6 +20,14 @@ internal class GgufMetadataReaderImpl(
 ) : GgufMetadataReader {
     companion object {
         private const val ARCH_LLAMA = "llama"
+
+        // Real GGUF metadata strings (names, keys, chat templates, license text) top out at tens
+        // of KB - a declared length past this is a malformed/hostile file, not a legitimate one.
+        // Without this cap, a file can declare a single string's length as hundreds of MB and
+        // ByteArray(len) attempts that whole allocation up front, before a single byte is actually
+        // read - a cheap way to trigger an OutOfMemoryError from a tiny file. That's an Error, not
+        // an Exception, so it isn't caught by the model-loading call sites' catch (e: Exception).
+        private const val MAX_METADATA_STRING_LENGTH = 1_048_576 // 1 MiB
     }
 
     /** Enum corresponding to GGUF metadata value types (for convenience and array element typing). */
@@ -519,7 +527,7 @@ internal class GgufMetadataReaderImpl(
     private fun readString(input: InputStream): String =
         // Read 8-byte little-endian length (number of bytes in the string).
         readLittleLong(input).let { len ->
-            if (len < 0 || len > Int.MAX_VALUE) throw IOException("String too long: $len")
+            if (len < 0 || len > MAX_METADATA_STRING_LENGTH) throw IOException("String too long: $len")
 
             // Read the UTF-8 bytes of the given length.
             ByteArray(len.toInt()).let {
