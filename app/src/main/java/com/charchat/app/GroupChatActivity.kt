@@ -55,6 +55,13 @@ class GroupChatActivity : AppCompatActivity() {
     private lateinit var group: Group
     private lateinit var members: List<Character>
     private lateinit var membersById: Map<String, Character>
+    // Deliberately never cancelled on onStop(): generation can take minutes on this hardware, and
+    // backgrounding the app (switching apps, locking the screen, a notification) used to silently
+    // discard it. lifecycleScope only cancels on true onDestroy(), so leaving this alone lets a
+    // reply keep generating while the screen is merely stopped, and still stops cleanly once the
+    // conversation is actually left (back button, or this Activity being destroyed for any other
+    // reason). This can't survive the OS killing the whole process outright under memory pressure -
+    // that would need a foreground service to prevent, which is a bigger change than this fix.
     private var generationJob: Job? = null
     private var isReady = false
     private var isGenerating = false
@@ -359,11 +366,6 @@ class GroupChatActivity : AppCompatActivity() {
         toolbar.menu.findItem(R.id.action_clear_group_conversation)?.isEnabled = false
 
         lifecycleScope.launch(Dispatchers.Default) { replayConversation() }
-    }
-
-    override fun onStop() {
-        generationJob?.cancel()
-        super.onStop()
     }
 
     companion object {

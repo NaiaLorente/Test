@@ -55,6 +55,13 @@ class ChatActivity : AppCompatActivity() {
 
     private lateinit var engine: InferenceEngine
     private lateinit var character: Character
+    // Deliberately never cancelled on onStop(): generation can take minutes on this hardware, and
+    // backgrounding the app (switching apps, locking the screen, a notification) used to silently
+    // discard it. lifecycleScope only cancels on true onDestroy(), so leaving this alone lets a
+    // reply keep generating while the screen is merely stopped, and still stops cleanly once the
+    // conversation is actually left (back button, or this Activity being destroyed for any other
+    // reason). This can't survive the OS killing the whole process outright under memory pressure -
+    // that would need a foreground service to prevent, which is a bigger change than this fix.
     private var generationJob: Job? = null
     private var isReady = false
     private var characterAvatarBitmap: Bitmap? = null
@@ -421,11 +428,6 @@ class ChatActivity : AppCompatActivity() {
         character = Character.fromJson(JSONObject(json))
         applyHeader()
         clearConversation()
-    }
-
-    override fun onStop() {
-        generationJob?.cancel()
-        super.onStop()
     }
 
     companion object {
