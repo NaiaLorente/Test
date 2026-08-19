@@ -53,6 +53,16 @@ constexpr float DEFAULT_SAMPLER_TEMP    = 0.6f; // overridden per-character via 
 constexpr float SAMPLER_REPEAT_PENALTY  = 1.15f;
 constexpr int   SAMPLER_REPEAT_LAST_N   = 256;
 
+// DRY ("don't repeat yourself") targets repeated *phrases/sentences* rather than individual
+// tokens - the classic repeat penalty above only discourages reusing the same tokens, so a model
+// can still loop the same sentence structure or catchphrase turn after turn with a fresh token
+// mix each time. dry_penalty_last_n is a fixed-size ring buffer (its cost per generated token
+// does not grow with conversation length), kept modest since it's paid on every single token on
+// phone-class CPUs; 0.8x multiplier and the library's own defaults for the rest are the commonly
+// used settings for creative writing/roleplay.
+constexpr float SAMPLER_DRY_MULTIPLIER   = 0.8f;
+constexpr int   SAMPLER_DRY_LAST_N       = 512;
+
 /**
  * Rolling-summary memory: when the context fills up, older messages are condensed into a short
  * summary (via a short, isolated generation) instead of being silently dropped, so identity and
@@ -247,6 +257,8 @@ static common_sampler *new_sampler(float temp) {
     sparams.temp = temp;
     sparams.penalty_repeat = SAMPLER_REPEAT_PENALTY;
     sparams.penalty_last_n = SAMPLER_REPEAT_LAST_N;
+    sparams.dry_multiplier = SAMPLER_DRY_MULTIPLIER;
+    sparams.dry_penalty_last_n = SAMPLER_DRY_LAST_N;
     return common_sampler_init(g_model, sparams);
 }
 

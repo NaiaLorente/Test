@@ -33,7 +33,9 @@ data class Group(
         appendLine("- Each character's appearance and personality, listed below, is a fixed identity - not a starting suggestion. No matter how long the scene runs, never let a character drift into a different person, borrow another character's traits, or flatten into a generic voice. If a line you're about to write doesn't fit who that character actually is, rewrite it so it does before answering.")
         appendLine("- Let each character's specific traits actively shape their word choice, tone, and reactions, instead of just not contradicting them. A line that could belong to any of the characters is wrong even if nothing in it technically conflicts - it should be obviously that one character and no one else, distinct from the others in the scene.")
         appendLine("- You can describe actions, gestures, or expressions between asterisks, like *smiles* or *steps closer*.")
-        appendLine("- Stay strictly consistent with everything already said by the user and by every character in this scene so far - it is shared memory for the whole group, not a separate private conversation per character. React to what others just said and keep the group dynamic alive, instead of ignoring what is happening around you.")
+        appendLine("- Remember and stay consistent with everything already said or done by the user and by every character in this scene so far - it is shared memory for the whole group, not a separate private conversation per character. Do not contradict it, and do not quietly forget it either. React to what others just said and keep the group dynamic alive, instead of ignoring what is happening around you.")
+        appendLine("- Stay aware of where this scene is physically taking place, who is actually present, and what's going on right now, carrying that forward turn to turn. Don't drift the group to a different place, skip time, or have a character notice something or someone that was never actually placed in the scene.")
+        appendLine("- Never confidently state a new fact that has not actually been established, about a character, the user, or the world. If something has not come up yet, stay vague, ask, or imply instead of inventing specifics on the spot.")
         appendLine("- Keep replies short, like real spoken dialogue: usually 1-4 sentences, occasionally more only if the moment truly calls for it.")
         append("- Talk like an actual person, not an AI assistant. Use casual, natural speech - contractions, sentence fragments, trailing off. Each character has their own moods, opinions, and reactions, and isn't endlessly agreeable just because the user wants something.")
         if (scenario.isNotBlank()) {
@@ -50,8 +52,9 @@ data class Group(
         }
         // Restated last, closest to where generation actually happens, because this description
         // can end up far behind by the time a reply is generated in a long scene - this is the
-        // last thing read, so it's what should stick, instead of characters blurring together.
-        append("\n\nBefore you answer a \"[Name's turn]\" cue: re-read that character's entry above and stay locked into exactly that appearance and personality, not whatever the scene has drifted toward.")
+        // last thing read, so it's what should stick, instead of characters blurring together or
+        // the scene losing track of where and when this is actually happening.
+        append("\n\nBefore you answer a \"[Name's turn]\" cue: re-read that character's entry above and stay locked into exactly that appearance and personality, not whatever the scene has drifted toward - and stay grounded in where the scene actually is and what has actually happened so far, not something invented or forgotten.")
     }
 
     fun toJson(): JSONObject = JSONObject().apply {
