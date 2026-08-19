@@ -158,8 +158,10 @@ interface InferenceEngine {
         // fabricated/generic padding the longer they run, which reads as robotic rather than
         // human (real dialogue is punchy, not multi-paragraph). Shorter also means faster,
         // directly cutting wait time on slower/bigger models since generation time scales with
-        // token count.
-        const val DEFAULT_PREDICT_LENGTH = 180
+        // token count. Cut further from 180 - even within that cap, replies were still drifting
+        // into rambling tangents and self-contradiction the longer a single reply ran, so this
+        // trades a little more length for the model having less room to wander per turn.
+        const val DEFAULT_PREDICT_LENGTH = 120
     }
 }
 

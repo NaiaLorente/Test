@@ -90,6 +90,15 @@ constexpr int   SAMPLER_REPEAT_LAST_N   = 256;
 constexpr float SAMPLER_DRY_MULTIPLIER   = 0.8f;
 constexpr int   SAMPLER_DRY_LAST_N       = 512;
 
+// min-p discards any token whose probability is below this fraction of the top candidate's -
+// the actual guard against sampling a stray low-probability token that derails a reply into
+// something incoherent (a nonsensical action, a contradicted fact) that the model then has to
+// keep building on for the rest of that reply. common_params_sampling defaults to 0.05 for this
+// if left unset, which was previously happening here implicitly - pinned explicitly instead so
+// this app's behavior can't silently change if that library default ever changes, and raised a
+// little given the incoherence this was meant to guard against was still observed at 0.05.
+constexpr float SAMPLER_MIN_P            = 0.1f;
+
 /**
  * Rolling-summary memory: when the context fills up, older messages are condensed into a short
  * summary (via a short, isolated generation) instead of being silently dropped, so identity and
@@ -286,6 +295,7 @@ static common_sampler *new_sampler(float temp) {
     sparams.penalty_last_n = SAMPLER_REPEAT_LAST_N;
     sparams.dry_multiplier = SAMPLER_DRY_MULTIPLIER;
     sparams.dry_penalty_last_n = SAMPLER_DRY_LAST_N;
+    sparams.min_p = SAMPLER_MIN_P;
     return common_sampler_init(g_model, sparams);
 }
 
