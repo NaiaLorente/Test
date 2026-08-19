@@ -25,11 +25,11 @@ import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.imageview.ShapeableImageView
 import com.google.android.material.textfield.TextInputEditText
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -250,14 +250,14 @@ class ChatActivity : AppCompatActivity() {
      * adb access to pull it from logcat otherwise. Show it as selectable text instead so it can be
      * copied and sent along with a bug report.
      */
-    private fun showErrorDetailsDialog(detail: String) {
+    private fun showErrorDetailsDialog(detail: String, title: String = "Error loading the conversation") {
         val textView = TextView(this).apply {
             text = detail
             setTextIsSelectable(true)
             setPadding(48, 32, 48, 32)
         }
         AlertDialog.Builder(this)
-            .setTitle("Error loading the conversation")
+            .setTitle(title)
             .setMessage("Long-press to select and copy the text below so it can be reported:")
             .setView(ScrollView(this).apply { addView(textView) })
             .setPositiveButton("OK", null)
@@ -311,29 +311,50 @@ class ChatActivity : AppCompatActivity() {
         }
 
         generationJob = lifecycleScope.launch(Dispatchers.Default) {
-            engine.sendUserPrompt(userMsg)
-                .onCompletion {
-                    tickerJob.cancel()
-                    // Reveal the reply only once generation is fully done, instead of as it's
-                    // being written, replacing the thinking indicator with the complete text.
-                    withContext(Dispatchers.Main) {
-                        statusTv.visibility = View.GONE
-                        val messageCount = messages.size
-                        check(messageCount > 0 && !messages[messageCount - 1].isUser)
+            try {
+                // Reveal the reply only once generation is fully done, instead of as it's being
+                // written, replacing the thinking indicator with the complete text.
+                engine.sendUserPrompt(userMsg).collect { token -> lastAssistantMsg.append(token) }
+                tickerJob.cancel()
+                withContext(Dispatchers.Main) {
+                    statusTv.visibility = View.GONE
+                    val messageCount = messages.size
+                    check(messageCount > 0 && !messages[messageCount - 1].isUser)
 
-                        messages.removeAt(messageCount - 1).copy(
-                            content = lastAssistantMsg.toString(),
-                            isThinking = false
-                        ).let { messages.add(it) }
+                    messages.removeAt(messageCount - 1).copy(
+                        content = lastAssistantMsg.toString(),
+                        isThinking = false
+                    ).let { messages.add(it) }
 
-                        messageAdapter.notifyItemChanged(messages.size - 1)
-                        userInputEt.isEnabled = true
-                        sendFab.isEnabled = true
-                    }
-                    persist()
-                }.collect { token ->
-                    lastAssistantMsg.append(token)
+                    messageAdapter.notifyItemChanged(messages.size - 1)
+                    userInputEt.isEnabled = true
+                    sendFab.isEnabled = true
                 }
+                persist()
+            } catch (e: CancellationException) {
+                tickerJob.cancel()
+                throw e
+            } catch (e: Exception) {
+                // A native failure or other error during generation used to leave the thinking
+                // placeholder stuck (or, since it's blank, silently turn into an empty reply
+                // bubble once collection finished with nothing collected) with no explanation.
+                // Drop it and say what happened instead, the same way replayConversation() does.
+                tickerJob.cancel()
+                Log.e(TAG, "Failed to generate a reply", e)
+                val detail = "${e.javaClass.simpleName}: ${e.message}\n\n${e.stackTraceToString()}"
+                withContext(Dispatchers.Main) {
+                    statusTv.text = "Error generating a reply."
+                    val messageCount = messages.size
+                    if (messageCount > 0 && messages[messageCount - 1].isThinking) {
+                        messages.removeAt(messageCount - 1)
+                        messageAdapter.notifyItemRemoved(messageCount - 1)
+                    }
+                    userInputEt.isEnabled = true
+                    sendFab.isEnabled = true
+                    showErrorDetailsDialog(detail, title = "Error generating a reply")
+                }
+                persist()
+            }
         }
     }
 

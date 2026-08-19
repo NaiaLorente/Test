@@ -257,12 +257,53 @@ class CharacterGalleryActivity : AppCompatActivity() {
         startActivity(Intent(this, GroupChatActivity::class.java).putExtra(GroupChatActivity.EXTRA_GROUP_ID, group.id))
     }
 
+    /**
+     * A character can be part of one or more group chats - deleting them used to silently strand
+     * those groups (or leave a dangling member reference in ones that survive), with nothing ever
+     * telling the user or cleaning it up. This warns about exactly what will happen to each
+     * affected group, and actually resolves it on confirm: a group that would drop below
+     * [MIN_GROUP_SIZE] members is deleted along with the character, and one that still has enough
+     * members left gets its membership list pruned instead of keeping a dead reference forever.
+     */
     private fun confirmDelete(character: Character) {
+        val affectedGroups = ConversationStore.groupsContaining(this, character.id)
+        val allCharacters = ConversationStore.listCharacters(this).associateBy { it.id }
+        fun groupLabel(group: Group) = group.displayName(group.characterIds.mapNotNull { allCharacters[it] })
+
+        val orphanedGroups = affectedGroups.filter { it.characterIds.size - 1 < MIN_GROUP_SIZE }
+        val shrinkingGroups = affectedGroups - orphanedGroups.toSet()
+
+        val message = buildString {
+            append("This will permanently delete the character and its conversation.")
+            if (orphanedGroups.isNotEmpty()) {
+                val names = orphanedGroups.joinToString(", ") { "\"${groupLabel(it)}\"" }
+                val plural = orphanedGroups.size > 1
+                append("\n\n${character.name.ifBlank { "This character" }} is the last thing keeping ")
+                append(if (plural) "these group chats" else "the group chat $names")
+                append(if (plural) " ($names) " else " ")
+                append("above the $MIN_GROUP_SIZE-character minimum - ")
+                append(if (plural) "they" else "it")
+                append(" will be permanently deleted too, along with ")
+                append(if (plural) "their conversations." else "its conversation.")
+            }
+            if (shrinkingGroups.isNotEmpty()) {
+                val names = shrinkingGroups.joinToString(", ") { "\"${groupLabel(it)}\"" }
+                append("\n\nThey'll also be removed from ")
+                append(if (shrinkingGroups.size > 1) "these group chats: $names" else "the group chat $names")
+                append(".")
+            }
+        }
+
         AlertDialog.Builder(this)
             .setTitle("Delete ${character.name.ifBlank { "this character" }}?")
-            .setMessage("This will permanently delete the character and its conversation.")
+            .setMessage(message)
             .setPositiveButton("Delete") { _, _ ->
                 ConversationStore.delete(this, character.id)
+                orphanedGroups.forEach { ConversationStore.deleteGroup(this, it.id) }
+                shrinkingGroups.forEach { group ->
+                    val prunedGroup = group.copy(characterIds = group.characterIds - character.id)
+                    ConversationStore.saveGroup(this, prunedGroup, ConversationStore.loadGroupMessages(this, group.id))
+                }
                 refreshCharacterList()
             }
             .setNegativeButton("Cancel", null)

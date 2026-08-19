@@ -24,11 +24,11 @@ import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.imageview.ShapeableImageView
 import com.google.android.material.textfield.TextInputEditText
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -245,14 +245,14 @@ class GroupChatActivity : AppCompatActivity() {
         }
     }
 
-    private fun showErrorDetailsDialog(detail: String) {
+    private fun showErrorDetailsDialog(detail: String, title: String = "Error loading the conversation") {
         val textView = TextView(this).apply {
             text = detail
             setTextIsSelectable(true)
             setPadding(48, 32, 48, 32)
         }
         AlertDialog.Builder(this)
-            .setTitle("Error loading the conversation")
+            .setTitle(title)
             .setMessage("Long-press to select and copy the text below so it can be reported:")
             .setView(ScrollView(this).apply { addView(textView) })
             .setPositiveButton("OK", null)
@@ -305,30 +305,54 @@ class GroupChatActivity : AppCompatActivity() {
         }
 
         generationJob = lifecycleScope.launch(Dispatchers.Default) {
-            engine.sendUserPrompt("[${character.name.ifBlank { "Unnamed" }}'s turn]")
-                .onCompletion {
-                    tickerJob.cancel()
-                    withContext(Dispatchers.Main) {
-                        statusTv.visibility = View.GONE
-                        val messageCount = messages.size
-                        check(messageCount > 0 && !messages[messageCount - 1].isUser)
+            try {
+                engine.sendUserPrompt("[${character.name.ifBlank { "Unnamed" }}'s turn]")
+                    .collect { token -> lastAssistantMsg.append(token) }
+                tickerJob.cancel()
+                withContext(Dispatchers.Main) {
+                    statusTv.visibility = View.GONE
+                    val messageCount = messages.size
+                    check(messageCount > 0 && !messages[messageCount - 1].isUser)
 
-                        val cleaned = stripSelfNamePrefix(lastAssistantMsg.toString(), character.name)
-                        messages.removeAt(messageCount - 1).copy(
-                            content = cleaned,
-                            isThinking = false
-                        ).let { messages.add(it) }
+                    val cleaned = stripSelfNamePrefix(lastAssistantMsg.toString(), character.name)
+                    messages.removeAt(messageCount - 1).copy(
+                        content = cleaned,
+                        isThinking = false
+                    ).let { messages.add(it) }
 
-                        messageAdapter.notifyItemChanged(messages.size - 1)
-                        userInputEt.isEnabled = true
-                        sendFab.isEnabled = true
-                        speakerChips.forEach { it.isEnabled = true }
-                        isGenerating = false
-                    }
-                    persist()
-                }.collect { token ->
-                    lastAssistantMsg.append(token)
+                    messageAdapter.notifyItemChanged(messages.size - 1)
+                    userInputEt.isEnabled = true
+                    sendFab.isEnabled = true
+                    speakerChips.forEach { it.isEnabled = true }
+                    isGenerating = false
                 }
+                persist()
+            } catch (e: CancellationException) {
+                tickerJob.cancel()
+                throw e
+            } catch (e: Exception) {
+                // A native failure or other error during generation used to leave the thinking
+                // placeholder stuck (or, since it's blank, silently turn into an empty reply
+                // bubble once collection finished with nothing collected) with no explanation.
+                // Drop it and say what happened instead, the same way replayConversation() does.
+                tickerJob.cancel()
+                Log.e(TAG, "Failed to generate ${character.name}'s reply", e)
+                val detail = "${e.javaClass.simpleName}: ${e.message}\n\n${e.stackTraceToString()}"
+                withContext(Dispatchers.Main) {
+                    statusTv.text = "Error generating a reply."
+                    val messageCount = messages.size
+                    if (messageCount > 0 && messages[messageCount - 1].isThinking) {
+                        messages.removeAt(messageCount - 1)
+                        messageAdapter.notifyItemRemoved(messageCount - 1)
+                    }
+                    userInputEt.isEnabled = true
+                    sendFab.isEnabled = true
+                    speakerChips.forEach { it.isEnabled = true }
+                    isGenerating = false
+                    showErrorDetailsDialog(detail, title = "Error generating a reply")
+                }
+                persist()
+            }
         }
     }
 

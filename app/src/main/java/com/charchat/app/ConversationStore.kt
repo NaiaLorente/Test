@@ -84,6 +84,10 @@ object ConversationStore {
         fileFor(context, id).delete()
     }
 
+    /** Every group this character is currently a member of, so deleting them can warn about it. */
+    fun groupsContaining(context: Context, characterId: String): List<Group> =
+        listGroups(context).filter { characterId in it.characterIds }
+
     fun loadGroupMessages(context: Context, id: String): List<Message> {
         val file = groupFileFor(context, id)
         if (!file.exists()) return emptyList()

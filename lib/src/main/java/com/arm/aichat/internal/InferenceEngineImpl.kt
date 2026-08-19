@@ -331,8 +331,10 @@ internal class InferenceEngineImpl private constructor(
 
             processUserPrompt(message, predictLength).let { result ->
                 if (result != 0) {
-                    Log.e(TAG, describeNativeError("Failed to process user prompt", result))
-                    return@flow
+                    // Throw instead of silently returning: a caller collecting this flow otherwise
+                    // has no way to tell "the model produced an empty reply" apart from "nothing
+                    // was emitted because processing actually failed".
+                    throw RuntimeException(describeNativeError("Failed to process user prompt", result))
                 }
             }
 
