@@ -408,6 +408,10 @@ class GroupChatActivity : AppCompatActivity() {
         sendFab.isEnabled = false
         speakerChips.forEach { it.isEnabled = false }
 
+        // Checked against the count *before* this turn's own addition, so it fires on a stable,
+        // predictable cadence (every RULE_REMINDER_INTERVAL already-persisted messages).
+        val needsRuleReminder = messages.isNotEmpty() && messages.size % RULE_REMINDER_INTERVAL == 0
+
         lastAssistantMsg.clear()
         messages.add(Message(UUID.randomUUID().toString(), "", false, isThinking = true, speakerId = character.id))
         messageAdapter.notifyItemInserted(messages.size - 1)
@@ -430,6 +434,10 @@ class GroupChatActivity : AppCompatActivity() {
 
         generationJob = lifecycleScope.launch(Dispatchers.Default) {
             try {
+                if (needsRuleReminder) {
+                    runCatching { engine.seedSystemNote(group.toAgencyReminderNote()) }
+                        .onFailure { Log.w(TAG, "Failed to seed agency reminder note", it) }
+                }
                 engine.sendUserPrompt("[${character.name.ifBlank { "Unnamed" }}'s turn]")
                     .collect { token -> lastAssistantMsg.append(token) }
                 tickerJob.cancel()
@@ -663,5 +671,8 @@ class GroupChatActivity : AppCompatActivity() {
     companion object {
         private val TAG = GroupChatActivity::class.java.simpleName
         const val EXTRA_GROUP_ID = "group_id"
+
+        // Mirrors ChatActivity.RULE_REMINDER_INTERVAL - see its doc comment.
+        private const val RULE_REMINDER_INTERVAL = 10
     }
 }

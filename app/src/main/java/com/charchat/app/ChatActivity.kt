@@ -387,6 +387,11 @@ class ChatActivity : AppCompatActivity() {
         userInputEt.isEnabled = false
         sendFab.isEnabled = false
 
+        // Checked against the count *before* this turn's own additions, so it fires on a stable,
+        // predictable cadence (every RULE_REMINDER_INTERVAL already-persisted messages) rather
+        // than depending on how many messages this particular turn happens to add.
+        val needsRuleReminder = messages.isNotEmpty() && messages.size % RULE_REMINDER_INTERVAL == 0
+
         messages.add(Message(UUID.randomUUID().toString(), userMsg, true))
         messageAdapter.notifyItemInserted(messages.size - 1)
         lastAssistantMsg.clear()
@@ -417,6 +422,10 @@ class ChatActivity : AppCompatActivity() {
 
         generationJob = lifecycleScope.launch(Dispatchers.Default) {
             try {
+                if (needsRuleReminder) {
+                    runCatching { engine.seedSystemNote(character.toAgencyReminderNote()) }
+                        .onFailure { Log.w(TAG, "Failed to seed agency reminder note", it) }
+                }
                 // Reveal the reply only once generation is fully done, instead of as it's being
                 // written, replacing the thinking indicator with the complete text.
                 engine.sendUserPrompt(userMsg).collect { token -> lastAssistantMsg.append(token) }
@@ -593,5 +602,12 @@ class ChatActivity : AppCompatActivity() {
     companion object {
         private val TAG = ChatActivity::class.java.simpleName
         const val EXTRA_CHARACTER_ID = "character_id"
+
+        // How often (in already-persisted messages) to re-seed a short reminder of the single
+        // most safety-critical rule as an invisible system note close to generation - see
+        // Character.toAgencyReminderNote(). Not every message: each injection is a small but real
+        // extra decode, and the point is countering long-range positional drift as a conversation
+        // grows, not reinforcing something the model just read seconds ago anyway.
+        private const val RULE_REMINDER_INTERVAL = 10
     }
 }

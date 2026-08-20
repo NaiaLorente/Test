@@ -77,6 +77,24 @@ data class Character(
         }
     }
 
+    /**
+     * A short mid-conversation reminder of the single most safety-critical rule from
+     * [toSystemPrompt] (never deciding what happens to the user's character), meant to be
+     * periodically re-seeded as an invisible system note close to where generation is actually
+     * happening, rather than only ever sitting once at the very start of the conversation. The
+     * full system prompt doesn't move - as a conversation grows, it ends up positionally far from
+     * the current point, and a small model leans on what's nearby more than on what's technically
+     * still "in context". Reusing the same wording addresses that by repositioning it, not by
+     * rewording it again.
+     */
+    fun toAgencyReminderNote(): String {
+        val who = name.ifBlank { "your character" }
+        return "Reminder: $who only ever controls their own actions, words, thoughts, and feelings - " +
+            "never the user's, and never decides what happens to the user's character (getting hurt, " +
+            "caught, changed, or anything else). If something is about to happen to the user's " +
+            "character, stop there and let the user say what happens."
+    }
+
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
         put("name", name)

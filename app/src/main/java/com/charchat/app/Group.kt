@@ -63,6 +63,13 @@ data class Group(
         append("\n\nBefore you answer a \"[Name's turn]\" cue: re-read that character's entry above and stay locked into exactly that appearance and personality, not whatever the scene has drifted toward - and stay grounded in where the scene actually is and what has actually happened so far, not something invented or forgotten. Voice only that one character - never the user's, and never deciding what happens to them.")
     }
 
+    /** Mirrors [Character.toAgencyReminderNote] for a group scene - see that doc for why this exists. */
+    fun toAgencyReminderNote(): String =
+        "Reminder: no character controls the user's actions, words, or what happens to the user's " +
+            "character (getting hurt, caught, changed, or anything else) - only the user does. If " +
+            "something is about to happen to the user's character, stop there and let the user say " +
+            "what happens."
+
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
         put("name", name)
