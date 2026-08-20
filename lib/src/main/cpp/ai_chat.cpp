@@ -907,7 +907,7 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_getSystemPromptPositionNative(J
  */
 extern "C"
 JNIEXPORT jint JNICALL
-Java_com_arm_aichat_internal_InferenceEngineImpl_saveContextStateNative(JNIEnv *env, jobject /*unused*/, jstring jpath) {
+Java_com_arm_aichat_internal_InferenceEngineImpl_saveContextStateNative(JNIEnv *env, jobject /*unused*/, jstring jpath) try {
     g_last_operation = "saveContextStateNative";
     const auto *path = env->GetStringUTFChars(jpath, nullptr);
     const std::string path_str(path);
@@ -916,6 +916,12 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_saveContextStateNative(JNIEnv *
     const size_t state_size = llama_state_get_size(g_context);
     std::vector<uint8_t> buffer(state_size);
     const size_t written = llama_state_get_data(g_context, buffer.data(), buffer.size());
+    if (state_size == 0 || written == 0) {
+        // llama_state_get_size()/llama_state_get_data() already caught and logged whatever went
+        // wrong internally, returning 0 rather than throwing - nothing to write.
+        LOGe("%s: llama_state_get_data() produced no state to save", __func__);
+        return 4;
+    }
 
     const std::string tmp_path = path_str + ".tmp";
     {
@@ -938,6 +944,14 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_saveContextStateNative(JNIEnv *
         return 3;
     }
     return 0;
+} catch (const std::exception &e) {
+    LOGe("%s: uncaught exception: %s", __func__, e.what());
+    g_last_error = e.what();
+    return 99;
+} catch (...) {
+    LOGe("%s: uncaught non-std exception", __func__);
+    g_last_error = "unknown non-standard exception";
+    return 98;
 }
 
 /**
@@ -948,7 +962,7 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_saveContextStateNative(JNIEnv *
  */
 extern "C"
 JNIEXPORT jint JNICALL
-Java_com_arm_aichat_internal_InferenceEngineImpl_loadContextStateNative(JNIEnv *env, jobject /*unused*/, jstring jpath) {
+Java_com_arm_aichat_internal_InferenceEngineImpl_loadContextStateNative(JNIEnv *env, jobject /*unused*/, jstring jpath) try {
     g_last_operation = "loadContextStateNative";
     const auto *path = env->GetStringUTFChars(jpath, nullptr);
     const std::string path_str(path);
@@ -973,10 +987,22 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_loadContextStateNative(JNIEnv *
 
     const size_t applied = llama_state_set_data(g_context, buffer.data(), buffer.size());
     if (applied == 0) {
+        // llama_state_set_data() already caught and logged whatever went wrong internally
+        // (mismatched model arch, corrupt data, incompatible context) and returned 0 rather than
+        // throwing - the KV-cache is left untouched in that case, so it's safe to just report
+        // failure here and let the caller fall back to a normal replay.
         LOGe("%s: llama_state_set_data() rejected the saved state", __func__);
         return 4;
     }
     return 0;
+} catch (const std::exception &e) {
+    LOGe("%s: uncaught exception: %s", __func__, e.what());
+    g_last_error = e.what();
+    return 99;
+} catch (...) {
+    LOGe("%s: uncaught non-std exception", __func__);
+    g_last_error = "unknown non-standard exception";
+    return 98;
 }
 
 /**
@@ -995,7 +1021,7 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_beginContextRestoreNative(
         jobject /*unused*/,
         jstring jsystem_prompt,
         jint system_prompt_pos
-) {
+) try {
     g_last_operation = "beginContextRestoreNative";
     reset_long_term_states(/* clear_kv_cache */ false);
     reset_short_term_states();
@@ -1013,6 +1039,14 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_beginContextRestoreNative(
     system_prompt_position = system_prompt_pos;
     current_position = system_prompt_pos;
     return 0;
+} catch (const std::exception &e) {
+    LOGe("%s: uncaught exception: %s", __func__, e.what());
+    g_last_error = e.what();
+    return 99;
+} catch (...) {
+    LOGe("%s: uncaught non-std exception", __func__);
+    g_last_error = "unknown non-standard exception";
+    return 98;
 }
 
 /**
@@ -1027,7 +1061,7 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_appendRestoredEntryNative(
         jstring jrole,
         jstring jcontent,
         jint end_position
-) {
+) try {
     g_last_operation = "appendRestoredEntryNative";
     const auto *role = env->GetStringUTFChars(jrole, nullptr);
     const std::string role_str(role);
@@ -1044,6 +1078,14 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_appendRestoredEntryNative(
     chat_msg_end_positions.push_back(end_position);
     current_position = end_position;
     return 0;
+} catch (const std::exception &e) {
+    LOGe("%s: uncaught exception: %s", __func__, e.what());
+    g_last_error = e.what();
+    return 99;
+} catch (...) {
+    LOGe("%s: uncaught non-std exception", __func__);
+    g_last_error = "unknown non-standard exception";
+    return 98;
 }
 
 static int decode_tokens_in_batches(
