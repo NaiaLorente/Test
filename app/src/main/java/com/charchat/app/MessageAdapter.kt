@@ -91,7 +91,14 @@ class MessageAdapter(
     // Only offered on a solo chat's most recent exchange - null (the default) hides both actions,
     // which is what a group chat (many possible "last" speakers, no single redo target) wants.
     private val onRegenerateLast: (() -> Unit)? = null,
-    private val onEditLastUser: (() -> Unit)? = null
+    private val onEditLastUser: (() -> Unit)? = null,
+    // Long-press on any message (not just the last exchange) to delete it and everything after -
+    // the direct way to strike a bad reply (a hallucinated fact, the model deciding what the
+    // user's character did) from the conversation's actual memory the moment it appears, instead
+    // of it standing as canon and compounding for the rest of the chat. Offered in both solo and
+    // group chats, unlike regenerate/edit-last, since "delete from here" is unambiguous regardless
+    // of how many possible speakers there are.
+    private val onDeleteFrom: ((Int) -> Unit)? = null
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     var characterAvatar: Bitmap? = null
@@ -141,6 +148,12 @@ class MessageAdapter(
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
         val message = messages[position]
         val contentView = holder.itemView.findViewById<TextView>(R.id.msg_content)
+
+        holder.itemView.setOnLongClickListener {
+            if (message.isThinking) return@setOnLongClickListener false
+            onDeleteFrom?.invoke(position)
+            onDeleteFrom != null
+        }
 
         if (holder is AssistantMessageViewHolder) {
             if (message.isThinking) {

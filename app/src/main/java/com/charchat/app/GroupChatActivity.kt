@@ -75,7 +75,8 @@ class GroupChatActivity : AppCompatActivity() {
     private val messageAdapter = MessageAdapter(
         messages,
         onRegenerateLast = { regenerateLastReply() },
-        onEditLastUser = { startEditingLastUserMessage() }
+        onEditLastUser = { startEditingLastUserMessage() },
+        onDeleteFrom = { position -> confirmDeleteFrom(position) }
     )
     private val speakerChips = mutableListOf<View>()
 
@@ -534,6 +535,29 @@ class GroupChatActivity : AppCompatActivity() {
             userInputEt.setSelection(userText.length)
             userInputEt.requestFocus()
         }
+    }
+
+    /**
+     * Deletes [position] and every message after it from the actual conversation, then resyncs
+     * the model's memory to match - mirrors [ChatActivity.confirmDeleteFrom]/[ChatActivity.deleteFrom].
+     */
+    private fun confirmDeleteFrom(position: Int) {
+        if (!isReady || isGenerating || position !in messages.indices) return
+        AlertDialog.Builder(this)
+            .setTitle("Delete from here?")
+            .setMessage("This deletes this message and everything after it in the conversation.")
+            .setPositiveButton("Delete") { _, _ -> deleteFrom(position) }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun deleteFrom(position: Int) {
+        if (position !in messages.indices) return
+        val removedCount = messages.size - position
+        repeat(removedCount) { messages.removeAt(messages.lastIndex) }
+        messageAdapter.notifyItemRangeRemoved(position, removedCount)
+        persist()
+        resyncThenRun {}
     }
 
     /**

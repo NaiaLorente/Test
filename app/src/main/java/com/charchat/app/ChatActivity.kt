@@ -73,7 +73,8 @@ class ChatActivity : AppCompatActivity() {
     private val messageAdapter = MessageAdapter(
         messages,
         onRegenerateLast = { regenerateLastReply() },
-        onEditLastUser = { startEditingLastUserMessage() }
+        onEditLastUser = { startEditingLastUserMessage() },
+        onDeleteFrom = { position -> confirmDeleteFrom(position) }
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -518,6 +519,31 @@ class ChatActivity : AppCompatActivity() {
             userInputEt.setSelection(userText.length)
             userInputEt.requestFocus()
         }
+    }
+
+    /**
+     * Deletes [position] and every message after it from the actual conversation, then resyncs
+     * the model's memory to match - the direct way to strike a bad reply (a hallucinated fact, the
+     * model deciding what the user's character did) the moment it appears, rather than it standing
+     * as canon and everything after it building on it.
+     */
+    private fun confirmDeleteFrom(position: Int) {
+        if (!isReady || generationJob?.isActive == true || position !in messages.indices) return
+        AlertDialog.Builder(this)
+            .setTitle("Delete from here?")
+            .setMessage("This deletes this message and everything after it in the conversation.")
+            .setPositiveButton("Delete") { _, _ -> deleteFrom(position) }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun deleteFrom(position: Int) {
+        if (position !in messages.indices) return
+        val removedCount = messages.size - position
+        repeat(removedCount) { messages.removeAt(messages.lastIndex) }
+        messageAdapter.notifyItemRangeRemoved(position, removedCount)
+        persist()
+        resyncThenRun {}
     }
 
     /** Resets and replays the (already-trimmed) [messages] list, then runs [onReady] on the main thread. */
