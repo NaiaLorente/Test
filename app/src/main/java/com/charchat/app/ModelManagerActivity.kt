@@ -117,6 +117,10 @@ class ModelManagerActivity : AppCompatActivity() {
     }
 
     private fun switchTo(file: File) {
+        // Re-check rather than trusting confirmSwitch()'s earlier check: two list items tapped in
+        // quick succession can each show their own confirm dialog before isBusy is set, so both
+        // "Switch" buttons could end up calling this - only the first should actually proceed.
+        if (!canSwitchModelsNow()) return
         isBusy = true
         addFab.isEnabled = false
         modelsRv.adapter = null

@@ -77,6 +77,14 @@ class CharacterGalleryActivity : AppCompatActivity() {
             engine.state.first {
                 it !is InferenceEngine.State.Uninitialized && it !is InferenceEngine.State.Initializing
             }
+            // If a load is already in flight - e.g. this screen was recreated (rotation, the OS
+            // reclaiming it, etc.) while a previous instance's cold-start load from
+            // resumeOrPickModel() below was still running on the shared singleton engine - wait
+            // for THAT one to settle instead of racing it with a second loadModel() call, which
+            // would throw as soon as the first one reaches ModelReady (it only allows one load at
+            // a time). This is a no-op when nothing is already loading, since the state is then
+            // immediately something other than LoadingModel already.
+            engine.state.first { it !is InferenceEngine.State.LoadingModel }
             if (engine.state.value is InferenceEngine.State.ModelReady) {
                 // A model is already loaded in the shared singleton engine (e.g. this screen was
                 // recreated after being backgrounded, or a chat screen bounced back here) -
