@@ -8,8 +8,10 @@
 #include <csignal>
 #include <signal.h>
 #include <ctime>
-#include <fstream>
+#include <fcntl.h>
 #include <string>
+#include <sys/mman.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <vector>
 #include <sampling.h>
@@ -914,34 +916,54 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_saveContextStateNative(JNIEnv *
     env->ReleaseStringUTFChars(jpath, path);
 
     const size_t state_size = llama_state_get_size(g_context);
-    std::vector<uint8_t> buffer(state_size);
-    const size_t written = llama_state_get_data(g_context, buffer.data(), buffer.size());
-    if (state_size == 0 || written == 0) {
-        // llama_state_get_size()/llama_state_get_data() already caught and logged whatever went
-        // wrong internally, returning 0 rather than throwing - nothing to write.
-        LOGe("%s: llama_state_get_data() produced no state to save", __func__);
+    if (state_size == 0) {
+        // llama_state_get_size() already caught and logged whatever went wrong internally,
+        // returning 0 rather than throwing - nothing to write.
+        LOGe("%s: llama_state_get_size() produced no state to save", __func__);
         return 4;
     }
 
+    // Written via a memory-mapped file rather than a heap buffer the same size as the state
+    // (which can be tens to hundreds of MB for a long conversation): mmap's pages are file-backed
+    // and can be dropped/reloaded by the kernel under memory pressure instead of counting fully
+    // against the process's resident memory like a std::vector of the same size would - avoiding
+    // a real, unnecessary peak-memory spike stacked on top of the model weights and the KV-cache's
+    // own already-reserved memory.
     const std::string tmp_path = path_str + ".tmp";
-    {
-        std::ofstream out(tmp_path, std::ios::binary | std::ios::trunc);
-        if (!out) {
-            LOGe("%s: failed to open %s for writing", __func__, tmp_path.c_str());
-            return 1;
-        }
-        out.write(reinterpret_cast<const char *>(buffer.data()), (std::streamsize) written);
-        if (!out) {
-            LOGe("%s: failed to write state to %s", __func__, tmp_path.c_str());
-            out.close();
-            std::remove(tmp_path.c_str());
-            return 2;
-        }
+    const int fd = open(tmp_path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0600);
+    if (fd < 0) {
+        LOGe("%s: failed to open %s for writing", __func__, tmp_path.c_str());
+        return 1;
+    }
+    if (ftruncate(fd, (off_t) state_size) != 0) {
+        LOGe("%s: failed to size %s", __func__, tmp_path.c_str());
+        close(fd);
+        std::remove(tmp_path.c_str());
+        return 2;
+    }
+    void *mapped = mmap(nullptr, state_size, PROT_WRITE, MAP_SHARED, fd, 0);
+    close(fd); // the mapping itself keeps the file open at the OS level
+    if (mapped == MAP_FAILED) {
+        LOGe("%s: failed to mmap %s", __func__, tmp_path.c_str());
+        std::remove(tmp_path.c_str());
+        return 3;
+    }
+    const size_t written = llama_state_get_data(g_context, static_cast<uint8_t *>(mapped), state_size);
+    munmap(mapped, state_size);
+    if (written == 0) {
+        LOGe("%s: llama_state_get_data() produced no state to save", __func__);
+        std::remove(tmp_path.c_str());
+        return 5;
+    }
+    if (written < state_size) {
+        // Trim off the unused tail from ftruncate()'s up-front sizing, so a later load doesn't
+        // try to apply trailing garbage past what was actually written.
+        truncate(tmp_path.c_str(), (off_t) written);
     }
     if (std::rename(tmp_path.c_str(), path_str.c_str()) != 0) {
         LOGe("%s: failed to finalize %s", __func__, path_str.c_str());
         std::remove(tmp_path.c_str());
-        return 3;
+        return 6;
     }
     return 0;
 } catch (const std::exception &e) {
@@ -968,24 +990,33 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_loadContextStateNative(JNIEnv *
     const std::string path_str(path);
     env->ReleaseStringUTFChars(jpath, path);
 
-    std::ifstream in(path_str, std::ios::binary | std::ios::ate);
-    if (!in) {
+    // Read via a memory-mapped file rather than a heap buffer the same size as the state (which
+    // can be tens to hundreds of MB for a long conversation) - the same reasoning as the mmap'd
+    // write in saveContextStateNative, but on this side it's what was actually causing an
+    // intermittent low-memory kill on reopening a long conversation: a duplicate full-size
+    // in-heap copy of the state, competing for RAM with the model weights and the KV-cache's own
+    // already-reserved memory, at exactly the moment this runs.
+    const int fd = open(path_str.c_str(), O_RDONLY);
+    if (fd < 0) {
         LOGw("%s: no saved state at %s", __func__, path_str.c_str());
         return 1;
     }
-    const std::streamsize size = in.tellg();
-    if (size <= 0) {
-        LOGe("%s: saved state at %s is empty", __func__, path_str.c_str());
+    struct stat st{};
+    if (fstat(fd, &st) != 0 || st.st_size <= 0) {
+        LOGe("%s: saved state at %s is empty or unreadable", __func__, path_str.c_str());
+        close(fd);
         return 2;
     }
-    in.seekg(0, std::ios::beg);
-    std::vector<uint8_t> buffer((size_t) size);
-    if (!in.read(reinterpret_cast<char *>(buffer.data()), size)) {
-        LOGe("%s: failed to read saved state from %s", __func__, path_str.c_str());
+    const size_t size = (size_t) st.st_size;
+    void *mapped = mmap(nullptr, size, PROT_READ, MAP_PRIVATE, fd, 0);
+    close(fd); // the mapping itself keeps the file open at the OS level
+    if (mapped == MAP_FAILED) {
+        LOGe("%s: failed to mmap saved state from %s", __func__, path_str.c_str());
         return 3;
     }
 
-    const size_t applied = llama_state_set_data(g_context, buffer.data(), buffer.size());
+    const size_t applied = llama_state_set_data(g_context, static_cast<const uint8_t *>(mapped), size);
+    munmap(mapped, size);
     if (applied == 0) {
         // llama_state_set_data() already caught and logged whatever went wrong internally
         // (mismatched model arch, corrupt data, incompatible context) and returned 0 rather than
