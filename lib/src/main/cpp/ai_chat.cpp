@@ -60,18 +60,26 @@ static std::string json_escape(const std::string &s) {
  * LLama resources: context, model, batch and sampler
  */
 constexpr int   N_THREADS_MIN           = 2;
-constexpr int   N_THREADS_MAX           = 4;
+// Raised 4 -> 6 for the move to a 16GB-RAM, Snapdragon 8 Elite Gen 5 daily driver (from a much
+// more RAM/CPU-constrained phone) - the old cap of 4 was never tuned against this chip specifically.
+// This is a starting point, not a verified-optimal number: llama.cpp CPU decoding at batch size 1
+// is often memory-bandwidth-bound rather than purely compute-bound, so more threads doesn't
+// automatically mean faster, and could even lose to contention past some point. Use the engine's
+// own bench() to check actual tokens/sec against a few values on-device and adjust this if a
+// different number turns out faster in practice - don't trust this constant over a real measurement.
+constexpr int   N_THREADS_MAX           = 6;
 constexpr int   N_THREADS_HEADROOM      = 2;
 
-// Raised again (16384 -> 20480) now that the confirmed-fast daily-driver models are all in the
-// 3-4B class, which have plenty of RAM headroom to spare for a bigger KV-cache. This is the main
-// lever for "remembers more of the conversation": a bigger raw window means fewer, later
-// evictions before the rolling-summary mechanism below ever needs to kick in at all. Kept as a
-// moderate step up rather than doubling, since raw context is the only one of these settings that
-// risks an OOM kill on-device rather than just a slower/lower-quality result - revisit downward
-// again if a bigger model (7B+) becomes the daily driver, the same way it was cut for the 8B
-// Stheno experiments.
-constexpr int   DEFAULT_CONTEXT_SIZE    = 20480;
+// Raised again (20480 -> 32768) for the same reason as the thread cap above: moving to a
+// meaningfully more RAM-rich phone. Deliberately not scaled up by the same ~2x+ factor as the RAM
+// itself, though, since the whole point of this phone upgrade is also to run a bigger model (7B+
+// instead of 3-4B) - a bigger model's per-token KV-cache footprint is itself larger, so raising
+// both the model size and the context size by the full amount the RAM increase would allow risks
+// exactly the OOM kill this app already had to fix once (the mmap context-state work). 32768 is a
+// deliberately moderate step, and lines up with the native training context length of most current
+// 7-14B open models rather than being an arbitrary bigger number. Revisit again based on real
+// on-device headroom once a specific bigger model is actually chosen as the daily driver.
+constexpr int   DEFAULT_CONTEXT_SIZE    = 32768;
 constexpr int   OVERFLOW_HEADROOM       = 4;
 constexpr int   BATCH_SIZE              = 512;
 
